@@ -8,6 +8,7 @@
 #include <random>
 #include <string>
 #include <vector>
+#include <sstream>
 
 #include "common.h"
 
@@ -50,10 +51,10 @@ int main(int argc, char **argv) {
   }
 
   char *dataset_file_name =
-      find_string_option(argc, argv, "-f", "Admission_Predict.csv");
+      find_string_option(argc, argv, "-f", "../datasets/Admission_Predict.csv");
 
   std::ifstream dataset_file;
-  dataset_file.open("datasets/" + dataset_file_name);
+  dataset_file.open(dataset_file_name);
   if (!dataset_file.is_open()) {
     std::cerr << "Error opening dataset" << std::endl;
     return -1;
@@ -65,10 +66,10 @@ int main(int argc, char **argv) {
   std::vector<std::vector<double>> csvData;
   while (std::getline(dataset_file, line)) {
     std::stringstream ss(line);
-    std::vector<std::string> row;
+    std::vector<double> row;
     std::string cell;
     while (std::getline(ss, cell, ',')) {
-      row.push_back((double)cell);
+      row.push_back(std::stod(cell));
     }
     csvData.push_back(row);
   }
@@ -77,30 +78,32 @@ int main(int argc, char **argv) {
   int N = csvData.size();
   // last dimension is the y_value
   int D = csvData[0].size() - 1;
+  std::cout << "N =" << N << std::endl;
+  std::cout << "d =" << D << std::endl;
   int split = ceil(0.8 * N);
-  double *x_train = malloc(split * D * sizeof(double));
-  double *x_test = malloc((N - split) * D * sizeof(double));
-  double *y_train = malloc(split * sizeof(double));
-  double *y_test = malloc((N - split) * sizeof(double));
-  double *accuracy = malloc(sizeof(double));
+  std::cout << "Split =" << split << std::endl;
+  std::cout.flush();
+
+  double *x_train = (double*) malloc(split * D * sizeof(double));
+  double *x_test = (double*) malloc((N - split) * D * sizeof(double));
+  double *y_train = (double*) malloc(split * sizeof(double));
+  double *y_test = (double*) malloc((N - split) * sizeof(double));
+  double *accuracy = (double*) malloc(sizeof(double));
 
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < D; ++j) {
       if (i < split) {
         x_train[i * D + j] = csvData[i][j];
       } else {
-        x_test[i * D + j] = csvData[i][j];
+        x_test[(i - split) * D + j] = csvData[i][j];
       }
     }
     if (i < split) {
       y_train[i] = csvData[i][D];
     } else {
-      y_test[i] = csvData[i][D];
+      y_test[i - split] = csvData[i][D];
     }
   }
-
-  std::cout << "Size of x train: " << sizeof(x_train) / sizeof(x_train[0])
-            << std::endl;
 
   // copy data to the gpu
   double *x_train_gpu;
@@ -137,15 +140,17 @@ int main(int argc, char **argv) {
   cudaMemcpy(accuracy, accuracy_gpu, sizeof(double), cudaMemcpyDeviceToHost);
 
   // Finalize
-  std::cout << "Training and Prediction Time = " << seconds << " seconds for "
-            << num_parts << " particles." << std::endl;
+  std::cout << "Training and Prediction Time = " << seconds << std::endl;
   std::cout << "Accuracy = " << *accuracy << std::endl;
+  std::cout.flush();
   cudaFree(x_train_gpu);
   cudaFree(x_test_gpu);
   cudaFree(y_train_gpu);
   cudaFree(y_test_gpu);
+  cudaFree(accuracy_gpu);
   free(x_train);
   free(x_test);
   free(y_train);
   free(y_test);
+  free(accuracy);
 }
