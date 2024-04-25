@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "common.h"
 #include <cassert>
+#include <iostream>
 
 std::vector<int> argsort(std::vector<double> &x, int d, int D, int N)
 {
@@ -43,7 +44,7 @@ std::vector<double> sort_by_indices(std::vector<double> &y, std::vector<int> &in
 
 split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train)
 {
-    double weight = 1 / N;
+    double weight = 1.0 / N;
     double min_loss = std::numeric_limits<double>::infinity();
     int feature = std::numeric_limits<int>::infinity();
     double cut_value = std::numeric_limits<double>::infinity();
@@ -61,15 +62,14 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
 
         double mean_square_left = 0.0;
         double mean_left = 0.0;
-        double weight_left = 0;
-        double mean_square_right = weight * std::accumulate(y_train_sorted_squared.begin(), y_train_sorted_squared.end(), 0);
-        double mean_right = weight * std::accumulate(x_train_sorted.begin(), y_train_sorted.end(), 0);
-        double weight_right = 1;
+        double weight_left = 0.0;
+        double mean_square_right = weight * std::accumulate(y_train_sorted_squared.begin(), y_train_sorted_squared.end(), 0.0);
+        double mean_right = weight * std::accumulate(y_train_sorted.begin(), y_train_sorted.end(), 0.0);
+        double weight_right = 1.0;
 
         // Only consider splits with at least one value on each side
         for (int i = 0; i < N - 1; ++i)
         {
-            double delta_w = weight;
             double delta_mean_squared = weight * y_train_sorted_squared[i];
             double delta_mean = weight * y_train_sorted[i];
 
@@ -131,29 +131,27 @@ bool rows_equal(std::vector<double> &x, int D, int N, double epsilon)
 
 tree_node_t *build_cart_serial(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
 {
-    double weight = 1 / N;
-    std::vector<int> idx(N);
-
-    for (int i = 0; i < N; ++i)
-    {
-        idx[i] = i;
-    }
-
+    double weight = 1.0 / N;
     double mean = 0.0;
     for (int i = 0; i < N; ++i)
     {
         mean += y_train[i];
     }
+    // if (std::abs(mean) < THRESHOLD)
+    // {
+    //     mean = 0;
+    // }
+
     mean /= N;
 
-    if (depth == 0 || elements_equal(y_train, N, y_train[0], 1e-6) || rows_equal(x_train, D, N, 1e-6))
+    if (depth == 0 || elements_equal(y_train, N, y_train[0], THRESHOLD) || rows_equal(x_train, D, N, THRESHOLD))
     {
         tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
         leaf->left = NULL;
         leaf->right = NULL;
         leaf->parent = NULL;
         leaf->prediction = mean;
-        leaf->cut_feature = NAN;
+        leaf->cut_feature = -1;
         leaf->cut_value = NAN;
         return leaf;
     }
@@ -168,19 +166,32 @@ tree_node_t *build_cart_serial(int D, int N, std::vector<double> &x_train, std::
         {
             double x = x_train[i * D + split.cut_feature];
             double y = y_train[i];
+
             if (x <= split.cut_value)
             {
-                left_x_train.push_back(x);
+                left_x_train.insert(left_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
                 left_y_train.push_back(y);
             }
             else
             {
-                right_x_train.push_back(x);
+                right_x_train.insert(right_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
                 right_y_train.push_back(y);
             }
         }
-        tree_node_t *left = build_cart_serial(D, left_x_train.size(), left_x_train, left_y_train, depth - 1);
-        tree_node_t *right = build_cart_serial(D, right_x_train.size(), right_x_train, right_y_train, depth - 1);
+        if (right_y_train.size() == 0 || left_y_train.size() == 0)
+        {
+            tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
+            leaf->left = NULL;
+            leaf->right = NULL;
+            leaf->parent = NULL;
+            leaf->prediction = mean;
+            leaf->cut_feature = -1;
+            leaf->cut_value = NAN;
+            return leaf;
+        }
+
+        tree_node_t *left = build_cart_serial(D, left_y_train.size(), left_x_train, left_y_train, depth - 1);
+        tree_node_t *right = build_cart_serial(D, right_y_train.size(), right_x_train, right_y_train, depth - 1);
 
         tree_node_t *node = (tree_node_t *)malloc(sizeof(tree_node_t));
         node->cut_feature = split.cut_feature;
@@ -192,4 +203,44 @@ tree_node_t *build_cart_serial(int D, int N, std::vector<double> &x_train, std::
         right->parent = node;
         return node;
     }
+}
+
+double eval_helper(tree_node_t *tree, std::vector<double> &data)
+{
+    if (tree->left == NULL && tree->right == NULL)
+    {
+        return tree->prediction;
+    }
+
+    int feature = tree->cut_feature;
+    int cut_value = tree->cut_value;
+
+    if (data[feature] <= cut_value)
+    {
+        return eval_helper(tree->left, data);
+    }
+    else
+    {
+        return eval_helper(tree->right, data);
+    }
+}
+
+double eval_serial(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
+{
+    std::vector<double> predictions(N);
+    for (int i = 0; i < N; ++i)
+    {
+        std::vector<double> data = std::vector<double>(x_test.begin() + i * D, x_test.begin() + i * D + D);
+        double prediction = eval_helper(tree, data);
+        predictions[i] = prediction;
+    }
+
+    // compute MSE
+    double accumulator = 0;
+    for (int i = 0; i < N; ++i)
+    {
+        accumulator += pow(predictions[i] - y_test[i], 2);
+    }
+
+    return accumulator / N;
 }
