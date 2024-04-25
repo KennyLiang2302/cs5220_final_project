@@ -12,10 +12,6 @@
 
 #include "common.h"
 
-// =================
-// Helper Functions
-// =================
-
 // Command Line Option Processing
 int find_arg_idx(int argc, char **argv, const char *option)
 {
@@ -66,10 +62,6 @@ void run_serial(double *x_train, double *y_train, double *x_test, double *y_test
   std::cout << "Training and Prediction Time = " << seconds << std::endl;
   std::cout << "MSE = " << mse << std::endl;
 }
-
-// ==============
-// Main Function
-// ==============
 
 int main(int argc, char **argv)
 {

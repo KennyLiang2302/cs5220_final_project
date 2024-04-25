@@ -102,6 +102,7 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
     return output;
 }
 
+/** Checks that all elements in a vector are equal to a value within some error */
 bool elements_equal(std::vector<double> &values, int size, double value, double epsilon)
 {
     for (int i = 0; i < size; ++i)
@@ -114,6 +115,7 @@ bool elements_equal(std::vector<double> &values, int size, double value, double 
     return true;
 }
 
+/** Checks that all rows are equal within some error*/
 bool rows_equal(std::vector<double> &x, int D, int N, double epsilon)
 {
     for (int i = 0; i < N - 1; ++i)
@@ -137,13 +139,10 @@ tree_node_t *build_cart_serial(int D, int N, std::vector<double> &x_train, std::
     {
         mean += y_train[i];
     }
-    // if (std::abs(mean) < THRESHOLD)
-    // {
-    //     mean = 0;
-    // }
 
     mean /= N;
 
+    // if no more branching can be done, return a leaf node
     if (depth == 0 || elements_equal(y_train, N, y_train[0], THRESHOLD) || rows_equal(x_train, D, N, THRESHOLD))
     {
         tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
@@ -190,6 +189,7 @@ tree_node_t *build_cart_serial(int D, int N, std::vector<double> &x_train, std::
             return leaf;
         }
 
+        // recursively build left and right subtrees
         tree_node_t *left = build_cart_serial(D, left_y_train.size(), left_x_train, left_y_train, depth - 1);
         tree_node_t *right = build_cart_serial(D, right_y_train.size(), right_x_train, right_y_train, depth - 1);
 
@@ -205,6 +205,7 @@ tree_node_t *build_cart_serial(int D, int N, std::vector<double> &x_train, std::
     }
 }
 
+/** Recursive helper for evaluating an input data point using a tree */
 double eval_helper(tree_node_t *tree, std::vector<double> &data)
 {
     if (tree->left == NULL && tree->right == NULL)
@@ -227,6 +228,7 @@ double eval_helper(tree_node_t *tree, std::vector<double> &data)
 
 double eval_serial(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
 {
+    // compute predictions
     std::vector<double> predictions(N);
     for (int i = 0; i < N; ++i)
     {
