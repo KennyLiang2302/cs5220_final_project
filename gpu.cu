@@ -68,6 +68,7 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
         double weight_right = 1.0;
 
         // Only consider splits with at least one value on each side
+        // TODO: We should only consider splits between two different numbers
         for (int i = 0; i < N - 1; ++i)
         {
             double delta_mean_squared = weight * y_train_sorted_squared[i];
