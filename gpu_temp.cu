@@ -35,6 +35,8 @@ split_output_t split_serial(int D, int N, thrust::device_vector<double> &x_train
     int feature = std::numeric_limits<int>::infinity();
     double cut_value = std::numeric_limits<double>::infinity();
 
+    thrust::vector<split_output_t> splits (N * D);
+
     // iterate through each feature
     for (int d = 0; d < D; ++d)
     {
@@ -58,31 +60,23 @@ split_output_t split_serial(int D, int N, thrust::device_vector<double> &x_train
         double mean_right = weight * thrust::reduce(y_train_sorted.begin(), y_train_sorted.end(), 0.0);
         double weight_right = 1.0;
 
-        // Only consider splits with at least one value on each side
-        for (int i = 0; i < N - 1; ++i)
-        {
-            double delta_mean_squared = weight * y_train_sorted_squared[i];
-            double delta_mean = weight * y_train_sorted[i];
+        thrust::vector<double> y_prefix_sum(N);
+        thrust::vector<double> y_squared_prefix_sum(N);
 
-            mean_square_left += delta_mean_squared;
-            mean_left += delta_mean;
-            weight_left += weight;
+        thrust::inclusive_scan(thrust::host, y_train_sorted.begin(), y_train_sorted.end(), y_prefix_sum.begin());
+        thrust::inclusive_scan(thrust::host, y_train_sorted_squared.begin(), y_train_sorted_squared.begin(), y_squared_prefix_sum.begin());
 
-            mean_square_right -= delta_mean_squared;
-            mean_right -= delta_mean;
-            weight_right -= weight;
+        // TODO: Also need to account for weight_left and weight_right. Can perform transform on array of indices (eg. 1 to N). Can also use custom GPU kernel.
+        thrust::transform(y_prefix_sum.begin(), y_prefix_sum.end(), y_squared_prefix_sum.begin(), losses.begin(), [weight, mean_square_right, mean_right] __device__ (double y, double y_squared) {
+                double mean_square_left = weight * y_squared;
+                double mean_left = weight * y;
+                double local_mean_right = mean_right - mean_left; 
+                double local_mean_sq_right = mean_square_right - mean_square_left;
+                double left_loss = mean_square_left - pow(mean_left, 2) / weight_left;
+                double right_loss = local_mean_sq_right - pow(local_mean_right, 2) / weight_right;
+                double loss = left_loss + right_loss;
+            });
 
-            double left_loss = mean_square_left - pow(mean_left, 2) / weight_left;
-            double right_loss = mean_square_right - pow(mean_right, 2) / weight_right;
-            double loss = left_loss + right_loss;
-
-            if (loss < min_loss)
-            {
-                min_loss = loss;
-                feature = d;
-                cut_value = (x_train_sorted[i] + x_train_sorted[i + 1]) / 2;
-            }
-        }
     }
 
     assert(feature != std::numeric_limits<int>::infinity());
