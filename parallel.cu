@@ -31,8 +31,8 @@ thrust::device_vector<int> argsort_gpu(thrust::device_vector<double> &x, int d, 
 
     double *x_ptr = thrust::raw_pointer_cast(x.data());
 
-    thrust::sort(indices.begin(), indices.end(), [x_ptr, D, d] __device__(int left_idx, int right_idx)
-                 { return x_ptr[left_idx * D + d] < x_ptr[right_idx * D + d]; });
+    thrust::stable_sort(indices.begin(), indices.end(), [x_ptr, D, d] __device__(int left_idx, int right_idx)
+                        { return x_ptr[left_idx * D + d] < x_ptr[right_idx * D + d]; });
     return indices;
 }
 
@@ -53,6 +53,7 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
 
         thrust::gather(thrust::device, indices_x.begin(), indices_x.end(), x_train.begin(), x_train_sorted.begin());
         thrust::gather(thrust::device, indices_y.begin(), indices_y.end(), y_train.begin(), y_train_sorted.begin());
+
         thrust::device_vector<double> y_train_sorted_squared(N);
         thrust::transform(y_train_sorted.begin(), y_train_sorted.end(), y_train_sorted_squared.begin(),
                           [] __device__(double x) -> double
@@ -65,7 +66,7 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
         thrust::device_vector<double> y_squared_prefix_sum(N);
 
         thrust::inclusive_scan(thrust::device, y_train_sorted.begin(), y_train_sorted.end(), y_prefix_sum.begin());
-        thrust::inclusive_scan(thrust::device, y_train_sorted_squared.begin(), y_train_sorted_squared.begin(), y_squared_prefix_sum.begin());
+        thrust::inclusive_scan(thrust::device, y_train_sorted_squared.begin(), y_train_sorted_squared.end(), y_squared_prefix_sum.begin());
 
         thrust::device_vector<int> split_indices(N - 1);
         thrust::sequence(split_indices.begin(), split_indices.end());
@@ -114,6 +115,7 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
                                                    return right;
                                                }
                                            });
+    std::cout << output.loss << " " << output.cut_feature << " " << output.cut_value << std::endl;
 
     return output;
 }
@@ -172,8 +174,9 @@ tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<
     }
     else
     {
-        thrust::device_vector<double> d_x_train(x_train);
-        thrust::device_vector<double> d_y_train(y_train);
+        thrust::device_vector<double> d_x_train(x_train.begin(), x_train.end());
+        thrust::device_vector<double> d_y_train(y_train.begin(), y_train.end());
+
         split_output_t split = split_gpu(D, N, d_x_train, d_y_train);
 
         std::vector<double> left_x_train, right_x_train;

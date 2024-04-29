@@ -54,6 +54,7 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
     {
         std::vector<int> indices = argsort(x_train, d, D, N);
         std::vector<double> x_train_sorted = sort_by_indices_flattened(x_train, indices, d, D, N);
+
         std::vector<double> y_train_sorted = sort_by_indices(y_train, indices, N);
         std::vector<double> y_train_sorted_squared(N);
         std::transform(y_train_sorted.begin(), y_train_sorted.end(), y_train_sorted_squared.begin(),
@@ -82,8 +83,8 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
             mean_right -= delta_mean;
             weight_right -= weight;
 
-            double left_loss = mean_square_left - pow(mean_left, 2) / weight_left;
-            double right_loss = mean_square_right - pow(mean_right, 2) / weight_right;
+            double left_loss = mean_square_left - (mean_left * mean_left) / weight_left;
+            double right_loss = mean_square_right - (mean_right * mean_right) / weight_right;
             double loss = left_loss + right_loss;
 
             if (loss < min_loss)
@@ -101,6 +102,7 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
     output.cut_feature = feature;
     output.cut_value = cut_value;
     output.loss = min_loss;
+    std::cout << min_loss << " " << feature << " " << cut_value << std::endl;
     return output;
 }
 

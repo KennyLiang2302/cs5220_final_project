@@ -4,7 +4,7 @@
 #define DEPTH 50
 #define NUM_BLOCKS 1
 #define NUM_THREADS 1
-#define THRESHOLD 1e-6
+#define THRESHOLD 1e-2
 
 typedef struct tree_node_t
 {

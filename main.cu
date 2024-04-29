@@ -38,21 +38,21 @@ char *find_string_option(int argc, char **argv, const char *option,
   return default_value;
 }
 
-void run_serial(double *x_train, double *y_train, double *x_test, double *y_test, int D, int N, int split)
+void run_serial(double *x_train, double *y_train, double *x_test, double *y_test, int D, int total_size, int train_size, int test_size)
 {
   // track start time
   auto start_time = std::chrono::steady_clock::now();
 
   // train and predict
-  std::vector<double> x_train_vec(x_train, x_train + D * N);
-  std::vector<double> y_train_vec(y_train, y_train + N);
-  tree_node_t *tree_node = build_cart(D, N, x_train_vec, y_train_vec, DEPTH);
+  std::vector<double> x_train_vec(x_train, x_train + D * train_size);
+  std::vector<double> y_train_vec(y_train, y_train + train_size);
+  tree_node_t *tree_node = build_cart(D, train_size, x_train_vec, y_train_vec, DEPTH);
 
   std::cout << "EVALUATION STARTED" << std::endl;
-  std::vector<double> x_test_vec(x_test, x_test + D * (N - split));
-  std::vector<double> y_test_vec(y_test, y_test + (N - split));
+  std::vector<double> x_test_vec(x_test, x_test + D * test_size);
+  std::vector<double> y_test_vec(y_test, y_test + test_size);
 
-  double mse = eval(D, (N - split), x_test_vec, y_test_vec, tree_node);
+  double mse = eval(D, test_size, x_test_vec, y_test_vec, tree_node);
 
   auto end_time = std::chrono::steady_clock::now();
 
@@ -162,7 +162,7 @@ int main(int argc, char **argv)
              cudaMemcpyHostToDevice);
 
   // benchmark serial implementation
-  run_serial(x_train, y_train, x_test, y_test, D, N, split);
+  run_serial(x_train, y_train, x_test, y_test, D, N, split, (N - split));
 
   cudaDeviceSynchronize();
   cudaMemcpy(accuracy, accuracy_gpu, sizeof(double), cudaMemcpyDeviceToHost);
