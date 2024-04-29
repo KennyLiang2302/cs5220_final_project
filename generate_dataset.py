@@ -2,7 +2,7 @@ import numpy as np
 import csv
 
 N = 1000
-filename_prefix = "../datasets/spiral"
+filename_prefix = "./datasets/spiral"
 
 
 def spiraldata(N):
@@ -27,6 +27,7 @@ def spiraldata(N):
 def write_to_csv(xTr, yTr):
     data = np.column_stack((xTr, yTr))
     data = data.tolist()
+    data.insert(0, ["x1", "x2", "y"])
 
     filename = f"{filename_prefix}_{N}.csv"
     with open(filename, "w", newline="") as file:
