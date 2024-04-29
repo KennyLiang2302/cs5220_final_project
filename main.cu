@@ -11,6 +11,8 @@
 #include "util.h"
 #include "common.h"
 
+bool computeMSE = true;
+
 // Command Line Option Processing
 int find_arg_idx(int argc, char **argv, const char *option)
 {
@@ -59,7 +61,15 @@ void run_serial(double *x_train, double *y_train, double *x_test, double *y_test
   std::vector<double> x_test_vec(x_test, x_test + D * test_size);
   std::vector<double> y_test_vec(y_test, y_test + test_size);
 
-  double mse = eval(D, test_size, x_test_vec, y_test_vec, tree_node);
+  double error;
+  if (computeMSE)
+  {
+    error = eval_mse(D, test_size, x_test_vec, y_test_vec, tree_node);
+  }
+  else
+  {
+    error = eval_classification(D, test_size, x_test_vec, y_test_vec, tree_node);
+  }
 
   auto end_time = std::chrono::steady_clock::now();
 
@@ -67,7 +77,7 @@ void run_serial(double *x_train, double *y_train, double *x_test, double *y_test
   double seconds = diff.count();
 
   std::cout << "Training and Prediction Time = " << seconds << std::endl;
-  std::cout << "MSE = " << mse << std::endl;
+  std::cout << "Error = " << error << std::endl;
 }
 
 int main(int argc, char **argv)
@@ -78,11 +88,24 @@ int main(int argc, char **argv)
     std::cout << "Options:" << std::endl;
     std::cout << "-h: see this help" << std::endl;
     std::cout << "-f: dataset csv file name" << std::endl;
+    std::cout << "-e: evaluation error metric" << std::endl;
     return 0;
   }
 
   char *dataset_file_name =
       find_string_option(argc, argv, "-f", "../datasets/Admission_Predict.csv");
+
+  std::string eval_type =
+      find_string_option(argc, argv, "-e", "mse");
+
+  if (eval_type == "mse")
+  {
+    computeMSE = true;
+  }
+  else
+  {
+    computeMSE = false;
+  }
 
   std::ifstream dataset_file;
   dataset_file.open(dataset_file_name);

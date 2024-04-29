@@ -8,6 +8,24 @@
 #include "util.h"
 #include <iostream>
 
+std::vector<int> idif(std::vector<double> &x, int D, int N)
+{
+    std::vector<int> output;
+
+    double prevValue = x[0];
+    for (int i = 1; i < N; ++i)
+    {
+        if (std::fabs(x[i] - prevValue) > THRESHOLD)
+        {
+            output.push_back(i - 1);
+            prevValue = x[i];
+        }
+    }
+    output.push_back(N - 1);
+
+    return output;
+}
+
 std::vector<int> argsort(std::vector<double> &x, int d, int D, int N)
 {
     std::vector<int> idx(N);
@@ -17,6 +35,11 @@ std::vector<int> argsort(std::vector<double> &x, int d, int D, int N)
                      [x, D, d](int i1, int i2) -> bool
                      { return x[i1 * D + d] < x[i2 * D + d]; });
     return idx;
+}
+
+double sum(std::vector<double> &x, int start, int end_inclusive)
+{
+    return std::accumulate(x.begin() + start, x.begin() + end_inclusive + 1, 0.0);
 }
 
 std::vector<double> sort_by_indices_flattened(std::vector<double> &x, std::vector<int> &indices, int d, int D, int N)
@@ -55,7 +78,6 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
     {
         std::vector<int> indices = argsort(x_train, d, D, N);
         std::vector<double> x_train_sorted = sort_by_indices_flattened(x_train, indices, d, D, N);
-
         std::vector<double> y_train_sorted = sort_by_indices(y_train, indices, N);
         std::vector<double> y_train_sorted_squared(N);
         std::transform(y_train_sorted.begin(), y_train_sorted.end(), y_train_sorted_squared.begin(),
@@ -70,19 +92,20 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
         double weight_right = 1.0;
 
         // Only consider splits with at least one value on each side
-        // TODO: We should only consider splits between two different numbers
-        for (int i = 0; i < N - 1; ++i)
+        std::vector<int> idif_idx = idif(x_train_sorted, D, N);
+        int pi = 0;
+        for (int i : idif_idx)
         {
-            double delta_mean_squared = weight * y_train_sorted_squared[i];
-            double delta_mean = weight * y_train_sorted[i];
+            double delta_mean_squared = weight * sum(y_train_sorted_squared, pi, i);
+            double delta_mean = weight * sum(y_train_sorted, pi, i);
 
             mean_square_left += delta_mean_squared;
             mean_left += delta_mean;
-            weight_left += weight;
+            weight_left += weight * (i + 1 - pi);
 
             mean_square_right -= delta_mean_squared;
             mean_right -= delta_mean;
-            weight_right -= weight;
+            weight_right -= weight * (i + 1 - pi);
 
             double left_loss = mean_square_left - (mean_left * mean_left) / weight_left;
             double right_loss = mean_square_right - (mean_right * mean_right) / weight_right;
@@ -94,6 +117,8 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
                 feature = d;
                 cut_value = (x_train_sorted[i] + x_train_sorted[i + 1]) / 2;
             }
+
+            pi = i + 1;
         }
     }
 
@@ -182,17 +207,6 @@ tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<
                 right_y_train.push_back(y);
             }
         }
-        if (right_y_train.size() == 0 || left_y_train.size() == 0)
-        {
-            tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
-            leaf->left = NULL;
-            leaf->right = NULL;
-            leaf->parent = NULL;
-            leaf->prediction = mean;
-            leaf->cut_feature = -1;
-            leaf->cut_value = NAN;
-            return leaf;
-        }
 
         // recursively build left and right subtrees
         tree_node_t *left = build_cart(D, left_y_train.size(), left_x_train, left_y_train, depth - 1);
@@ -231,7 +245,7 @@ double eval_helper(tree_node_t *tree, std::vector<double> &data)
     }
 }
 
-double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
+double eval_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
 {
     // compute predictions
     std::vector<double> predictions(N);
@@ -252,6 +266,35 @@ double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_te
     for (int i = 0; i < N; ++i)
     {
         accumulator += pow(predictions[i] - y_test[i], 2);
+    }
+
+    return accumulator / N;
+}
+
+double eval_classification(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
+{
+    // compute predictions
+    std::vector<double> predictions(N);
+    for (int i = 0; i < N; ++i)
+    {
+        std::vector<double> data = std::vector<double>(x_test.begin() + i * D, x_test.begin() + i * D + D);
+        double prediction = copysign(1.0, eval_helper(tree, data));
+        predictions[i] = prediction;
+    }
+
+    if (WRITE_TO_CSV)
+    {
+        write_data_to_csv("../datasets/pred.csv", predictions, N, 1);
+    }
+
+    // compute MSE
+    double accumulator = 0;
+    for (int i = 0; i < N; ++i)
+    {
+        if (predictions[i] != y_test[i])
+        {
+            accumulator += 1;
+        }
     }
 
     return accumulator / N;

@@ -248,7 +248,33 @@ double eval_helper_gpu(tree_node_t *tree, std::vector<double> &data)
     }
 }
 
-double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
+double eval_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
+{
+    // compute predictions
+    std::vector<double> predictions(N);
+    for (int i = 0; i < N; ++i)
+    {
+        std::vector<double> data = std::vector<double>(x_test.begin() + i * D, x_test.begin() + i * D + D);
+        double prediction = eval_helper_gpu(tree, data);
+        predictions[i] = prediction;
+    }
+
+    if (WRITE_TO_CSV)
+    {
+        write_data_to_csv("../datasets/pred.csv", predictions, N, 1);
+    }
+
+    // compute MSE
+    double accumulator = 0;
+    for (int i = 0; i < N; ++i)
+    {
+        accumulator += pow(predictions[i] - y_test[i], 2);
+    }
+
+    return accumulator / N;
+}
+
+double eval_classification(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
 {
     // compute predictions
     std::vector<double> predictions(N);

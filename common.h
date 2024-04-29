@@ -1,10 +1,12 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
+#include <cfloat>
+
 #define DEPTH 50
 #define NUM_BLOCKS 1
 #define NUM_THREADS 1
-#define THRESHOLD 1e-2
+#define THRESHOLD 100 * DBL_EPSILON
 #define WRITE_TO_CSV false
 
 typedef struct tree_node_t
@@ -29,6 +31,8 @@ tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<
 
 // function for making predictions on a dataset and computing accuracy. xtest
 // and ytest are both in cpu memory
-double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree);
+double eval_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree);
+
+double eval_classification(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree);
 
 #endif
