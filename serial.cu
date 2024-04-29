@@ -100,6 +100,7 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
     split_output_t output;
     output.cut_feature = feature;
     output.cut_value = cut_value;
+    output.loss = min_loss;
     return output;
 }
 
@@ -132,7 +133,7 @@ bool rows_equal(std::vector<double> &x, int D, int N, double epsilon)
     return true;
 }
 
-tree_node_t *build_cart_serial(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
+tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
 {
     double weight = 1.0 / N;
     double mean = 0.0;
@@ -191,8 +192,8 @@ tree_node_t *build_cart_serial(int D, int N, std::vector<double> &x_train, std::
         }
 
         // recursively build left and right subtrees
-        tree_node_t *left = build_cart_serial(D, left_y_train.size(), left_x_train, left_y_train, depth - 1);
-        tree_node_t *right = build_cart_serial(D, right_y_train.size(), right_x_train, right_y_train, depth - 1);
+        tree_node_t *left = build_cart(D, left_y_train.size(), left_x_train, left_y_train, depth - 1);
+        tree_node_t *right = build_cart(D, right_y_train.size(), right_x_train, right_y_train, depth - 1);
 
         tree_node_t *node = (tree_node_t *)malloc(sizeof(tree_node_t));
         node->cut_feature = split.cut_feature;
@@ -227,7 +228,7 @@ double eval_helper(tree_node_t *tree, std::vector<double> &data)
     }
 }
 
-double eval_serial(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
+double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
 {
     // compute predictions
     std::vector<double> predictions(N);

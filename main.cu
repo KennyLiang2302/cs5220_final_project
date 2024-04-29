@@ -46,13 +46,13 @@ void run_serial(double *x_train, double *y_train, double *x_test, double *y_test
   // train and predict
   std::vector<double> x_train_vec(x_train, x_train + D * N);
   std::vector<double> y_train_vec(y_train, y_train + N);
-  tree_node_t *tree_node = build_cart_serial(D, N, x_train_vec, y_train_vec, DEPTH);
+  tree_node_t *tree_node = build_cart(D, N, x_train_vec, y_train_vec, DEPTH);
 
   std::cout << "EVALUATION STARTED" << std::endl;
   std::vector<double> x_test_vec(x_test, x_test + D * (N - split));
   std::vector<double> y_test_vec(y_test, y_test + (N - split));
 
-  double mse = eval_serial(D, (N - split), x_test_vec, y_test_vec, tree_node);
+  double mse = eval(D, (N - split), x_test_vec, y_test_vec, tree_node);
 
   auto end_time = std::chrono::steady_clock::now();
 

@@ -9,9 +9,14 @@ if (NOT "${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
     set(Prg-Clang "PrgEnv-cray")
 endif ()
 
-add_executable(gpu main.cu gpu.cu common.h)
+add_executable(serial main.cu serial.cu common.h)
+add_executable(gpu main.cu parallel.cu common.h)
+
 target_compile_features(gpu PRIVATE cxx_std_11)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60")
+target_compile_features(serial PRIVATE cxx_std_11)
+
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60 -extended-lambda")
 
 # Copy the job scripts
 configure_file(job-gpu job-gpu COPYONLY)
+configure_file(job-serial job-serial COPYONLY)

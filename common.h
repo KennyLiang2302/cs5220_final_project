@@ -20,13 +20,14 @@ typedef struct split_output_t
 {
   int cut_feature;
   double cut_value;
+  double loss;
 } split_output_t;
 
 // function for tree construction. xtrain and ytrain are both in cpu memory
-tree_node_t *build_cart_serial(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth);
+tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth);
 
 // function for making predictions on a dataset and computing accuracy. xtest
 // and ytest are both in cpu memory
-double eval_serial(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree);
+double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree);
 
 #endif
