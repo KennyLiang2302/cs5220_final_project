@@ -9,8 +9,8 @@ if (NOT "${CMAKE_C_COMPILER_ID}" STREQUAL "GNU")
     set(Prg-Clang "PrgEnv-cray")
 endif ()
 
-add_executable(serial main.cu serial.cu common.h)
-add_executable(gpu main.cu parallel.cu common.h)
+add_executable(serial main.cu serial.cu common.h util.h)
+add_executable(gpu main.cu parallel.cu common.h util.h)
 
 target_compile_features(gpu PRIVATE cxx_std_11)
 target_compile_features(serial PRIVATE cxx_std_11)

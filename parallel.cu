@@ -6,6 +6,7 @@
 #include <thrust/gather.h>
 #include <vector>
 #include "common.h"
+#include "util.h"
 
 __device__ int round_down(int x, int D)
 {
@@ -260,7 +261,7 @@ double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_te
 
     if (WRITE_TO_CSV)
     {
-        write_to_csv("../datasets/pred.csv", predictions, N, 1);
+        write_data_to_csv("../datasets/pred.csv", predictions, N, 1);
     }
 
     // compute MSE

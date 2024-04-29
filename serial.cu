@@ -5,9 +5,8 @@
 #include <algorithm>
 #include "common.h"
 #include <cassert>
+#include "util.h"
 #include <iostream>
-
-#include "util.cpp"
 
 std::vector<int> argsort(std::vector<double> &x, int d, int D, int N)
 {
@@ -245,7 +244,7 @@ double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_te
 
     if (WRITE_TO_CSV)
     {
-        write_to_csv("../datasets/pred.csv", predictions, N, 1);
+        write_data_to_csv("../datasets/pred.csv", predictions, N, 1);
     }
 
     // compute MSE

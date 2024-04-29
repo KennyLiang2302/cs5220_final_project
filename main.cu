@@ -1,5 +1,4 @@
 #include <cuda.h>
-
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -9,9 +8,8 @@
 #include <string>
 #include <vector>
 #include <sstream>
-
+#include "util.h"
 #include "common.h"
-#include "util.cpp"
 
 // Command Line Option Processing
 int find_arg_idx(int argc, char **argv, const char *option)
@@ -47,6 +45,14 @@ void run_serial(double *x_train, double *y_train, double *x_test, double *y_test
   // train and predict
   std::vector<double> x_train_vec(x_train, x_train + D * train_size);
   std::vector<double> y_train_vec(y_train, y_train + train_size);
+
+  if (WRITE_TO_CSV)
+  {
+    // create a csv with xtrain and ytrain data
+    write_data_to_csv("../datasets/x_train.csv", x_train_vec, train_size, D);
+    write_data_to_csv("../datasets/y_train.csv", y_train_vec, train_size, 1);
+  }
+
   tree_node_t *tree_node = build_cart(D, train_size, x_train_vec, y_train_vec, DEPTH);
 
   std::cout << "EVALUATION STARTED" << std::endl;
@@ -107,11 +113,9 @@ int main(int argc, char **argv)
   // last dimension is the y_value
   int D = csvData[0].size() - 1;
   std::cout << "N = " << N << std::endl;
-  std::cout << "d = " << D << std::endl;
+  std::cout << "D = " << D << std::endl;
   int train_size = ceil(0.8 * N);
   int test_size = N - train_size;
-  std::cout << "Split = " << split << std::endl;
-  std::cout.flush();
 
   double *x_train = (double *)malloc(train_size * D * sizeof(double));
   double *x_test = (double *)malloc(test_size * D * sizeof(double));
@@ -142,13 +146,6 @@ int main(int argc, char **argv)
     }
   }
 
-  if (WRITE_TO_CSV)
-  {
-    // create a csv with xtrain and ytrain data
-    write_to_csv("../datasets/x_train.csv", x_train, train_size, D);
-    write_to_csv("../datasets/y_train.csv", y_train, train_size, 1);
-  }
-
   // copy data to the gpu
   double *x_train_gpu;
   double *y_train_gpu;
@@ -171,7 +168,7 @@ int main(int argc, char **argv)
              cudaMemcpyHostToDevice);
 
   // benchmark serial implementation
-  run_serial(x_train, y_train, x_test, y_test, D, N, split, (N - split));
+  run_serial(x_train, y_train, x_test, y_test, D, N, train_size, test_size);
 
   cudaDeviceSynchronize();
   cudaMemcpy(accuracy, accuracy_gpu, sizeof(double), cudaMemcpyDeviceToHost);

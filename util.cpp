@@ -6,7 +6,7 @@
 #include <vector>
 #include <sstream>
 
-void write_to_csv(char *file_name, std::vector<double> data, int N, int D)
+void write_data_to_csv(char *file_name, std::vector<double> data, int N, int D)
 {
   std::ofstream file(file_name);
   if (!file)
