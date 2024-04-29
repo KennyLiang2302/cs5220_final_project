@@ -258,6 +258,11 @@ double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_te
         predictions[i] = prediction;
     }
 
+    if (WRITE_TO_CSV)
+    {
+        write_to_csv("../datasets/pred.csv", predictions, N, 1);
+    }
+
     // compute MSE
     double accumulator = 0;
     for (int i = 0; i < N; ++i)

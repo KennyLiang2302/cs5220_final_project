@@ -11,6 +11,7 @@
 #include <sstream>
 
 #include "common.h"
+#include "util.cpp"
 
 // Command Line Option Processing
 int find_arg_idx(int argc, char **argv, const char *option)
@@ -107,37 +108,45 @@ int main(int argc, char **argv)
   int D = csvData[0].size() - 1;
   std::cout << "N = " << N << std::endl;
   std::cout << "d = " << D << std::endl;
-  int split = ceil(0.8 * N);
+  int train_size = ceil(0.8 * N);
+  int test_size = N - train_size;
   std::cout << "Split = " << split << std::endl;
   std::cout.flush();
 
-  double *x_train = (double *)malloc(split * D * sizeof(double));
-  double *x_test = (double *)malloc((N - split) * D * sizeof(double));
-  double *y_train = (double *)malloc(split * sizeof(double));
-  double *y_test = (double *)malloc((N - split) * sizeof(double));
+  double *x_train = (double *)malloc(train_size * D * sizeof(double));
+  double *x_test = (double *)malloc(test_size * D * sizeof(double));
+  double *y_train = (double *)malloc(train_size * sizeof(double));
+  double *y_test = (double *)malloc(test_size * sizeof(double));
   double *accuracy = (double *)malloc(sizeof(double));
 
   for (int i = 0; i < N; ++i)
   {
     for (int j = 0; j < D; ++j)
     {
-      if (i < split)
+      if (i < train_size)
       {
         x_train[i * D + j] = csvData[i][j];
       }
       else
       {
-        x_test[(i - split) * D + j] = csvData[i][j];
+        x_test[(i - train_size) * D + j] = csvData[i][j];
       }
     }
-    if (i < split)
+    if (i < train_size)
     {
       y_train[i] = csvData[i][D];
     }
     else
     {
-      y_test[i - split] = csvData[i][D];
+      y_test[i - train_size] = csvData[i][D];
     }
+  }
+
+  if (WRITE_TO_CSV)
+  {
+    // create a csv with xtrain and ytrain data
+    write_to_csv("../datasets/x_train.csv", x_train, train_size, D);
+    write_to_csv("../datasets/y_train.csv", y_train, train_size, 1);
   }
 
   // copy data to the gpu
@@ -146,19 +155,19 @@ int main(int argc, char **argv)
   double *x_test_gpu;
   double *y_test_gpu;
   double *accuracy_gpu;
-  cudaMalloc((void **)&x_train_gpu, split * D * sizeof(double));
-  cudaMalloc((void **)&y_train_gpu, split * sizeof(double));
-  cudaMalloc((void **)&x_test_gpu, (N - split) * D * sizeof(double));
-  cudaMalloc((void **)&y_test_gpu, (N - split) * sizeof(double));
+  cudaMalloc((void **)&x_train_gpu, train_size * D * sizeof(double));
+  cudaMalloc((void **)&y_train_gpu, train_size * sizeof(double));
+  cudaMalloc((void **)&x_test_gpu, test_size * D * sizeof(double));
+  cudaMalloc((void **)&y_test_gpu, test_size * sizeof(double));
   cudaMalloc((void **)&accuracy_gpu, 1 * sizeof(double));
 
-  cudaMemcpy(x_train_gpu, x_train, split * D * sizeof(double),
+  cudaMemcpy(x_train_gpu, x_train, train_size * D * sizeof(double),
              cudaMemcpyHostToDevice);
-  cudaMemcpy(x_test_gpu, x_test, (N - split) * D * sizeof(double),
+  cudaMemcpy(x_test_gpu, x_test, test_size * D * sizeof(double),
              cudaMemcpyHostToDevice);
-  cudaMemcpy(y_train_gpu, y_train, split * sizeof(double),
+  cudaMemcpy(y_train_gpu, y_train, train_size * sizeof(double),
              cudaMemcpyHostToDevice);
-  cudaMemcpy(y_test_gpu, y_test, (N - split) * sizeof(double),
+  cudaMemcpy(y_test_gpu, y_test, test_size * sizeof(double),
              cudaMemcpyHostToDevice);
 
   // benchmark serial implementation

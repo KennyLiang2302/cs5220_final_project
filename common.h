@@ -5,6 +5,7 @@
 #define NUM_BLOCKS 1
 #define NUM_THREADS 1
 #define THRESHOLD 1e-2
+#define WRITE_TO_CSV false
 
 typedef struct tree_node_t
 {

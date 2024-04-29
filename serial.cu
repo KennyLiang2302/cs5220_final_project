@@ -7,6 +7,8 @@
 #include <cassert>
 #include <iostream>
 
+#include "util.cpp"
+
 std::vector<int> argsort(std::vector<double> &x, int d, int D, int N)
 {
     std::vector<int> idx(N);
@@ -239,6 +241,11 @@ double eval(int D, int N, std::vector<double> &x_test, std::vector<double> &y_te
         std::vector<double> data = std::vector<double>(x_test.begin() + i * D, x_test.begin() + i * D + D);
         double prediction = eval_helper(tree, data);
         predictions[i] = prediction;
+    }
+
+    if (WRITE_TO_CSV)
+    {
+        write_to_csv("../datasets/pred.csv", predictions, N, 1);
     }
 
     // compute MSE
