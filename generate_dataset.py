@@ -2,7 +2,7 @@ import numpy as np
 import csv
 
 N = 1000
-filename_prefix = "dataset"
+filename_prefix = "../datasets/spiral"
 
 
 def spiraldata(N):
@@ -16,6 +16,11 @@ def spiraldata(N):
 
     print(xTr.shape)
     print(yTr.shape)
+
+    random_indices = np.random.permutation(len(xTr))
+    xTr = xTr[random_indices]
+    yTr = yTr[random_indices]
+
     return xTr, yTr
 
 
