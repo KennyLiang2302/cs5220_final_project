@@ -7,6 +7,7 @@
 #include <cassert>
 #include "util.h"
 #include <iostream>
+#include <cassert>
 
 std::vector<int> idif(std::vector<double> &x, int D, int N)
 {
@@ -21,7 +22,6 @@ std::vector<int> idif(std::vector<double> &x, int D, int N)
             prevValue = x[i];
         }
     }
-    output.push_back(N - 1);
 
     return output;
 }
@@ -101,7 +101,9 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
 
             mean_square_left += delta_mean_squared;
             mean_left += delta_mean;
+
             weight_left += weight * (i + 1 - pi);
+            assert((i + 1 - pi) != 0);
 
             mean_square_right -= delta_mean_squared;
             mean_right -= delta_mean;
@@ -163,7 +165,6 @@ bool rows_equal(std::vector<double> &x, int D, int N, double epsilon)
 
 tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
 {
-    double weight = 1.0 / N;
     double mean = 0.0;
     for (int i = 0; i < N; ++i)
     {
@@ -233,7 +234,7 @@ double eval_helper(tree_node_t *tree, std::vector<double> &data)
     }
 
     int feature = tree->cut_feature;
-    int cut_value = tree->cut_value;
+    double cut_value = tree->cut_value;
 
     if (data[feature] <= cut_value)
     {

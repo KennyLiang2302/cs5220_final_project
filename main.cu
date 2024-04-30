@@ -68,7 +68,7 @@ void run_serial(double *x_train, double *y_train, double *x_test, double *y_test
   }
   else
   {
-    error = eval_classification(D, test_size, x_test_vec, y_test_vec, tree_node);
+    error = eval_classification(D, train_size, x_train_vec, y_train_vec, tree_node);
   }
 
   auto end_time = std::chrono::steady_clock::now();
@@ -137,7 +137,7 @@ int main(int argc, char **argv)
   int D = csvData[0].size() - 1;
   std::cout << "N = " << N << std::endl;
   std::cout << "D = " << D << std::endl;
-  int train_size = ceil(0.8 * N);
+  int train_size = ceil(0.5 * N);
   int test_size = N - train_size;
 
   double *x_train = (double *)malloc(train_size * D * sizeof(double));
