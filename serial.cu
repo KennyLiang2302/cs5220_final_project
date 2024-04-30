@@ -78,6 +78,7 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
     {
         std::vector<int> indices = argsort(x_train, d, D, N);
         std::vector<double> x_train_sorted = sort_by_indices_flattened(x_train, indices, d, D, N);
+
         std::vector<double> y_train_sorted = sort_by_indices(y_train, indices, N);
         std::vector<double> y_train_sorted_squared(N);
         std::transform(y_train_sorted.begin(), y_train_sorted.end(), y_train_sorted_squared.begin(),
@@ -93,6 +94,7 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
 
         // Only consider splits with at least one value on each side
         std::vector<int> idif_idx = idif(x_train_sorted, D, N);
+
         int pi = 0;
         for (int i : idif_idx)
         {
@@ -130,7 +132,6 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
     output.cut_feature = feature;
     output.cut_value = cut_value;
     output.loss = min_loss;
-    std::cout << min_loss << " " << feature << " " << cut_value << std::endl;
     return output;
 }
 
