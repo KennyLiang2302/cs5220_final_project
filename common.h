@@ -2,6 +2,7 @@
 #define __COMMON_H__
 
 #include <cfloat>
+#include <vector>
 
 #define DEPTH 5
 #define NUM_BLOCKS 1
@@ -19,6 +20,11 @@ typedef struct tree_node_t
   double prediction;
 } tree_node_t;
 
+typedef struct forest_t
+{
+  std::vector<tree_node_t *> trees;
+} forest_t;
+
 typedef struct split_output_t
 {
   int cut_feature;
@@ -35,4 +41,7 @@ double eval_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &
 
 double eval_classification(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree);
 
+forest_t *build_forest(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth, int num_trees);
+
+double eval_forest(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, forest_t *forest);
 #endif
