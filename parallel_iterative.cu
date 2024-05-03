@@ -189,14 +189,101 @@ bool rows_equal_gpu(std::vector<double> &x, int D, int N, double epsilon)
 
 tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
 {
-    double weight = 1.0 / N;
-    double mean = 0.0;
-    for (int i = 0; i < N; ++i)
-    {
-        mean += y_train[i];
-    }
+    std::vector<tree_node_t *> tree;
 
-    mean /= N;
+    std::vector<double> x_train_curr(x_train);
+    std::vector<double> y_train_curr(y_train);
+    int n = N;
+    int current_idx = 0;
+    for (int i = 0; i < depth; ++i)
+    {
+        for (int j = 0; j < pow(2, i); ++j)
+        {
+
+            double weight = 1.0 / N;
+            double mean = 0.0;
+            for (int i = 0; i < N; ++i)
+            {
+                mean += y_train[i];
+            }
+
+            mean /= N;
+
+            int parent_idx = (current_idx - 1) / 2;
+            bool isLeftChild = (current_idx - 1) % 2 == 0;
+
+            if (tree[parent_idx]->cut_feature == -1 || i == depth - 1 || elements_equal_gpu(y_train, N, y_train[0], THRESHOLD) || rows_equal_gpu(x_train, D, N, THRESHOLD))
+            {
+                tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
+                leaf->left = NULL;
+                leaf->right = NULL;
+                leaf->parent = NULL;
+                leaf->prediction = mean;
+                leaf->cut_feature = -1;
+                leaf->cut_value = NAN;
+                tree.push_back(leaf);
+
+                if (tree[parent_idx]->cut_feature != -1)
+                {
+                    if (isLeftChild)
+                    {
+                        tree[parent_idx]->left = leaf;
+                    }
+                    else
+                    {
+                        tree[parent_idx]->right = leaf;
+                    }
+                }
+
+                current_idx += 1;
+                continue;
+            }
+
+            thrust::device_vector<double> d_x_train(x_train_curr.begin(), x_train_curr.end());
+            thrust::device_vector<double> d_y_train(y_train_curr.begin(), y_train_curr.end());
+
+            split_output_t split = split_gpu(D, n, d_x_train, d_y_train);
+
+            std::vector<double> left_x_train, right_x_train;
+            std::vector<double> left_y_train, right_y_train;
+
+            for (int i = 0; i < n; ++i)
+            {
+                double x = x_train[i * D + split.cut_feature];
+                double y = y_train[i];
+
+                if (x <= split.cut_value)
+                {
+                    left_x_train.insert(left_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
+                    left_y_train.push_back(y);
+                }
+                else
+                {
+                    right_x_train.insert(right_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
+                    right_y_train.push_back(y);
+                }
+            }
+
+            tree_node_t *node = (tree_node_t *)malloc(sizeof(tree_node_t));
+            node->cut_feature = split.cut_feature;
+            node->cut_value = split.cut_value;
+            node->left = NULL;
+            node->right = NULL;
+            node->prediction = mean;
+            if (isLeftChild)
+            {
+                tree[parent_idx]->left = node;
+            }
+            else
+            {
+                tree[parent_idx]->right = node;
+            }
+            node->parent = tree[parent_idx];
+            tree.push_back(node);
+
+            current_idx += 1;
+        }
+    }
 
     // if no more branching can be done, return a leaf node
     if (depth == 0 || elements_equal_gpu(y_train, N, y_train[0], THRESHOLD) || rows_equal_gpu(x_train, D, N, THRESHOLD))
