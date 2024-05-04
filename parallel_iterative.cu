@@ -11,6 +11,8 @@
 #include "common.h"
 #include "util.h"
 #include <utility>
+#include <omp.h>
+#include <algorithm>
 
 __device__ int round_down(int x, int D)
 {
@@ -201,13 +203,21 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
     std::vector<XYpair> split_data_temp;
     split_data_curr[0] = XYpair(x_train, y_train);
 
+    omp_set_num_threads(NUM_THREADS);
+
     int current_idx = 0;
     for (int i = 0; i <= depth; ++i)
     {
-        bool allNull = true;
+        int currentLevelSize = pow(2, i);
+        std::vector<bool> threadFinished(currentLevelSize, true);
+
         split_data_temp.resize(pow(2, i + 1));
-        for (int j = 0; j < pow(2, i); ++j)
+#pragma omp parallel for
+        for (int j = 0; j < currentLevelSize; ++j)
         {
+            int num_threads = omp_get_num_threads();
+            std::cout << num_threads << std::endl;
+
             std::vector<double> x_train_curr;
             std::vector<double> y_train_curr;
             // First iteration contains entirety of training data
@@ -219,9 +229,9 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
             // std::cout << "N " << N << " x_train size: " << x_train_curr.size() << std::endl;
             double weight = 1.0 / N;
             double mean = 0.0;
-            for (int i = 0; i < N; ++i)
+            for (int k = 0; k < N; ++k)
             {
-                mean += y_train_curr[i];
+                mean += y_train_curr[k];
             }
 
             mean /= N;
@@ -265,7 +275,7 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
                 continue;
             }
 
-            allNull = false;
+            threadFinished[j] = false;
 
             thrust::device_vector<double> d_x_train(x_train_curr.begin(), x_train_curr.end());
             thrust::device_vector<double> d_y_train(y_train_curr.begin(), y_train_curr.end());
@@ -327,7 +337,10 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
         }
 
         // Check if the entire layer is NULL or Leaves
-        if (allNull)
+        bool allTrue = std::all_of(threadFinished.begin(), threadFinished.end(), [](bool element)
+                                   { return element; });
+
+        if (allTrue)
         {
             break;
         }

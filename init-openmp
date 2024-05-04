@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# OpenMP settings
+export OMP_NUM_THREADS=64
+export OMP_PLACES=cores
+export OMP_PROC_BIND=spread
+
+source <(echo "export OMP_NUM_THREADS=$OMP_NUM_THREADS")
+source <(echo "export OMP_PLACES=$OMP_PLACES")
+source <(echo "export OMP_PROC_BIND=$OMP_PROC_BIND")
