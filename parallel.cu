@@ -11,6 +11,34 @@
 #include "common.h"
 #include "util.h"
 
+void print_device_double_vector(thrust::device_vector<double> &dev_vec, std::string name)
+{
+    std::vector<double> host_vec(dev_vec.size());
+    thrust::copy(dev_vec.begin(), dev_vec.end(), host_vec.begin());
+
+    // Print the host vector
+    std::cout << name << ":" << std::endl;
+    for (const auto &value : host_vec)
+    {
+        std::cout << value << " ";
+    }
+    std::cout << std::endl;
+}
+
+void print_device_int_vector(thrust::device_vector<int> &dev_vec, std::string name)
+{
+    std::vector<int> host_vec(dev_vec.size());
+    thrust::copy(dev_vec.begin(), dev_vec.end(), host_vec.begin());
+
+    // Print the host vector
+    std::cout << name << ":" << std::endl;
+    for (const auto &value : host_vec)
+    {
+        std::cout << value << " ";
+    }
+    std::cout << std::endl;
+}
+
 __device__ int round_down(int x, int D)
 {
     return x - (x % D);
@@ -77,6 +105,12 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
 
     thrust::device_vector<split_output_t> split_results((N - 1) * D);
 
+    split_output_t init_output;
+    init_output.cut_feature = std::numeric_limits<int>::infinity();
+    init_output.cut_value = std::numeric_limits<double>::infinity();
+    init_output.loss = std::numeric_limits<double>::infinity();
+    thrust::fill(split_results.begin(), split_results.end(), init_output);
+
     // iterate through each feature
     for (int d = 0; d < D; ++d)
     {
@@ -137,11 +171,6 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
         cudaDeviceSynchronize();
     }
 
-    split_output_t init_output;
-    init_output.cut_feature = std::numeric_limits<int>::infinity();
-    init_output.cut_value = std::numeric_limits<double>::infinity();
-    init_output.loss = std::numeric_limits<double>::infinity();
-
     split_output_t output = thrust::reduce(thrust::device, split_results.begin(), split_results.end(), init_output,
                                            [] __device__ __host__(split_output_t left, split_output_t right)
                                            {
@@ -154,6 +183,8 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
                                                    return right;
                                                }
                                            });
+
+    // std::cout << "split feature: " << output.cut_feature << " split value: " << output.cut_value << " loss: " << output.loss << std::endl;
 
     return output;
 }

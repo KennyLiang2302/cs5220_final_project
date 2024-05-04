@@ -4,7 +4,7 @@
 #include <cfloat>
 #include <vector>
 
-#define DEPTH 5
+#define DEPTH 10
 #define NUM_BLOCKS 1
 #define NUM_THREADS 1
 #define THRESHOLD 100 * DBL_EPSILON

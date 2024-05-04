@@ -11,6 +11,7 @@ endif ()
 
 add_executable(serial main.cu serial.cu common.h util.h)
 add_executable(gpu main.cu parallel.cu common.h util.h)
+add_executable(gpu_iterative main.cu parallel_iterative.cu common.h util.h)
 
 target_compile_features(gpu PRIVATE cxx_std_11)
 target_compile_features(serial PRIVATE cxx_std_11)
@@ -20,3 +21,4 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_60 -extended-lambda")
 # Copy the job scripts
 configure_file(job-gpu job-gpu COPYONLY)
 configure_file(job-serial job-serial COPYONLY)
+configure_file(job-gpu-iterative job-gpu-iterative COPYONLY)

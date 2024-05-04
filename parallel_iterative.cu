@@ -10,6 +10,7 @@
 #include <vector>
 #include "common.h"
 #include "util.h"
+#include <utility>
 
 __device__ int round_down(int x, int D)
 {
@@ -77,6 +78,12 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
 
     thrust::device_vector<split_output_t> split_results((N - 1) * D);
 
+    split_output_t init_output;
+    init_output.cut_feature = std::numeric_limits<int>::infinity();
+    init_output.cut_value = std::numeric_limits<double>::infinity();
+    init_output.loss = std::numeric_limits<double>::infinity();
+    thrust::fill(split_results.begin(), split_results.end(), init_output);
+
     // iterate through each feature
     for (int d = 0; d < D; ++d)
     {
@@ -137,11 +144,6 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
         cudaDeviceSynchronize();
     }
 
-    split_output_t init_output;
-    init_output.cut_feature = std::numeric_limits<int>::infinity();
-    init_output.cut_value = std::numeric_limits<double>::infinity();
-    init_output.loss = std::numeric_limits<double>::infinity();
-
     split_output_t output = thrust::reduce(thrust::device, split_results.begin(), split_results.end(), init_output,
                                            [] __device__ __host__(split_output_t left, split_output_t right)
                                            {
@@ -154,6 +156,8 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
                                                    return right;
                                                }
                                            });
+
+    // std::cout << "split feature: " << output.cut_feature << " split value: " << output.cut_value << " loss: " << output.loss << std::endl;
 
     return output;
 }
@@ -187,24 +191,37 @@ bool rows_equal_gpu(std::vector<double> &x, int D, int N, double epsilon)
     return true;
 }
 
-tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
+tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
 {
     std::vector<tree_node_t *> tree;
+    using XYpair = std::pair<std::vector<double>, std::vector<double>>;
 
-    std::vector<double> x_train_curr(x_train);
-    std::vector<double> y_train_curr(y_train);
-    int n = N;
+    // Pair of (x training data, y training data)
+    std::vector<XYpair> split_data_curr(1);
+    std::vector<XYpair> split_data_temp;
+    split_data_curr[0] = XYpair(x_train, y_train);
+
     int current_idx = 0;
-    for (int i = 0; i < depth; ++i)
+    for (int i = 0; i <= depth; ++i)
     {
+        bool allNull = true;
+        split_data_temp.resize(pow(2, i + 1));
         for (int j = 0; j < pow(2, i); ++j)
         {
+            std::vector<double> x_train_curr;
+            std::vector<double> y_train_curr;
+            // First iteration contains entirety of training data
 
+            x_train_curr = split_data_curr[j].first;
+            y_train_curr = split_data_curr[j].second;
+            int N = y_train_curr.size();
+
+            // std::cout << "N " << N << " x_train size: " << x_train_curr.size() << std::endl;
             double weight = 1.0 / N;
             double mean = 0.0;
             for (int i = 0; i < N; ++i)
             {
-                mean += y_train[i];
+                mean += y_train_curr[i];
             }
 
             mean /= N;
@@ -212,7 +229,16 @@ tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<
             int parent_idx = (current_idx - 1) / 2;
             bool isLeftChild = (current_idx - 1) % 2 == 0;
 
-            if (tree[parent_idx]->cut_feature == -1 || i == depth - 1 || elements_equal_gpu(y_train, N, y_train[0], THRESHOLD) || rows_equal_gpu(x_train, D, N, THRESHOLD))
+            // Case where there should be no node at this index
+            // If the parent node is a leaf or the parent node is also null, we push back null
+            if (current_idx != 0 && (tree[parent_idx] == NULL || tree[parent_idx]->cut_feature == -1))
+            {
+                tree.push_back(NULL);
+                current_idx += 1;
+                continue;
+            }
+            // Else if the current node's parent is not a leaf but the stopping criteria is reached, push back leaf
+            else if (i == depth || elements_equal_gpu(y_train_curr, N, y_train_curr[0], THRESHOLD) || rows_equal_gpu(x_train_curr, D, N, THRESHOLD))
             {
                 tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
                 leaf->left = NULL;
@@ -239,30 +265,42 @@ tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<
                 continue;
             }
 
+            allNull = false;
+
             thrust::device_vector<double> d_x_train(x_train_curr.begin(), x_train_curr.end());
             thrust::device_vector<double> d_y_train(y_train_curr.begin(), y_train_curr.end());
 
-            split_output_t split = split_gpu(D, n, d_x_train, d_y_train);
+            // std::cout << "d_x_train size: " << d_x_train.size() << "d_y_train size: " << d_y_train.size() << std::endl;
+
+            split_output_t split = split_gpu(D, N, d_x_train, d_y_train);
+            // std::cout << "split feature: " << split.cut_feature << "split value: " << split.cut_value << "loss: " << split.loss << std::endl;
 
             std::vector<double> left_x_train, right_x_train;
             std::vector<double> left_y_train, right_y_train;
 
-            for (int i = 0; i < n; ++i)
+            for (int i = 0; i < N; ++i)
             {
-                double x = x_train[i * D + split.cut_feature];
-                double y = y_train[i];
+                double x = x_train_curr[i * D + split.cut_feature];
+                double y = y_train_curr[i];
 
                 if (x <= split.cut_value)
                 {
-                    left_x_train.insert(left_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
+                    left_x_train.insert(left_x_train.end(), x_train_curr.begin() + i * D, x_train_curr.begin() + i * D + D);
                     left_y_train.push_back(y);
                 }
                 else
                 {
-                    right_x_train.insert(right_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
+                    right_x_train.insert(right_x_train.end(), x_train_curr.begin() + i * D, x_train_curr.begin() + i * D + D);
                     right_y_train.push_back(y);
                 }
             }
+            // std::cout << "Created training splits" << std::endl;
+
+            // Insert data for the next level
+            split_data_temp[j * 2] = XYpair(left_x_train, left_y_train);
+            split_data_temp[j * 2 + 1] = XYpair(right_x_train, right_y_train);
+
+            // std::cout << "Insert training data into split data temp" << std::endl;
 
             tree_node_t *node = (tree_node_t *)malloc(sizeof(tree_node_t));
             node->cut_feature = split.cut_feature;
@@ -270,74 +308,34 @@ tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<
             node->left = NULL;
             node->right = NULL;
             node->prediction = mean;
-            if (isLeftChild)
+
+            if (current_idx != 0)
             {
-                tree[parent_idx]->left = node;
+                if (isLeftChild)
+                {
+                    tree[parent_idx]->left = node;
+                }
+                else
+                {
+                    tree[parent_idx]->right = node;
+                }
+                node->parent = tree[parent_idx];
             }
-            else
-            {
-                tree[parent_idx]->right = node;
-            }
-            node->parent = tree[parent_idx];
             tree.push_back(node);
 
             current_idx += 1;
         }
-    }
 
-    // if no more branching can be done, return a leaf node
-    if (depth == 0 || elements_equal_gpu(y_train, N, y_train[0], THRESHOLD) || rows_equal_gpu(x_train, D, N, THRESHOLD))
-    {
-        tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
-        leaf->left = NULL;
-        leaf->right = NULL;
-        leaf->parent = NULL;
-        leaf->prediction = mean;
-        leaf->cut_feature = -1;
-        leaf->cut_value = NAN;
-        return leaf;
-    }
-    else
-    {
-        thrust::device_vector<double> d_x_train(x_train.begin(), x_train.end());
-        thrust::device_vector<double> d_y_train(y_train.begin(), y_train.end());
-
-        split_output_t split = split_gpu(D, N, d_x_train, d_y_train);
-
-        std::vector<double> left_x_train, right_x_train;
-        std::vector<double> left_y_train, right_y_train;
-
-        for (int i = 0; i < N; ++i)
+        // Check if the entire layer is NULL or Leaves
+        if (allNull)
         {
-            double x = x_train[i * D + split.cut_feature];
-            double y = y_train[i];
-
-            if (x <= split.cut_value)
-            {
-                left_x_train.insert(left_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
-                left_y_train.push_back(y);
-            }
-            else
-            {
-                right_x_train.insert(right_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
-                right_y_train.push_back(y);
-            }
+            break;
         }
 
-        // recursively build left and right subtrees
-        tree_node_t *left = build_cart(D, left_y_train.size(), left_x_train, left_y_train, depth - 1);
-        tree_node_t *right = build_cart(D, right_y_train.size(), right_x_train, right_y_train, depth - 1);
-
-        tree_node_t *node = (tree_node_t *)malloc(sizeof(tree_node_t));
-        node->cut_feature = split.cut_feature;
-        node->cut_value = split.cut_value;
-        node->left = left;
-        node->right = right;
-        node->prediction = mean;
-        left->parent = node;
-        right->parent = node;
-        return node;
+        split_data_curr = split_data_temp;
+        split_data_temp.clear();
     }
+    return tree[0];
 }
 
 /** Recursive helper for evaluating an input data point using a tree */

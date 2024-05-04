@@ -10,6 +10,28 @@
 #include <cassert>
 #include <cstdlib>
 
+void print_double_vector(std::vector<double> &host_vec, std::string name)
+{
+    // Print the host vector
+    std::cout << name << ":" << std::endl;
+    for (const auto &value : host_vec)
+    {
+        std::cout << value << " ";
+    }
+    std::cout << std::endl;
+}
+
+void print_int_vector(std::vector<int> &host_vec, std::string name)
+{
+    // Print the host vector
+    std::cout << name << ":" << std::endl;
+    for (const auto &value : host_vec)
+    {
+        std::cout << value << " ";
+    }
+    std::cout << std::endl;
+}
+
 std::vector<int> idif(std::vector<double> &x, int D, int N)
 {
     std::vector<int> output;
@@ -79,7 +101,6 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
     {
         std::vector<int> indices = argsort(x_train, d, D, N);
         std::vector<double> x_train_sorted = sort_by_indices_flattened(x_train, indices, d, D, N);
-
         std::vector<double> y_train_sorted = sort_by_indices(y_train, indices, N);
         std::vector<double> y_train_sorted_squared(N);
         std::transform(y_train_sorted.begin(), y_train_sorted.end(), y_train_sorted_squared.begin(),
