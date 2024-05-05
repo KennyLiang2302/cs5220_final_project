@@ -205,28 +205,26 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
 
     omp_set_num_threads(NUM_THREADS);
 
-    int current_idx = 0;
+    int current_layer_idx = 0;
     for (int i = 0; i <= depth; ++i)
     {
-        int currentLevelSize = pow(2, i);
-        std::vector<bool> threadFinished(currentLevelSize, true);
+        int curr_level_size = pow(2, i);
+        std::vector<bool> threadFinished(curr_level_size, true);
+        std::vector<tree_node_t *> curr_level(curr_level_size);
 
         split_data_temp.resize(pow(2, i + 1));
 #pragma omp parallel for
-        for (int j = 0; j < currentLevelSize; ++j)
+        for (int j = 0; j < curr_level_size; ++j)
         {
-            int num_threads = omp_get_num_threads();
-            std::cout << num_threads << std::endl;
-
+            int current_idx = current_layer_idx + j;
             std::vector<double> x_train_curr;
             std::vector<double> y_train_curr;
-            // First iteration contains entirety of training data
 
             x_train_curr = split_data_curr[j].first;
             y_train_curr = split_data_curr[j].second;
+
             int N = y_train_curr.size();
 
-            // std::cout << "N " << N << " x_train size: " << x_train_curr.size() << std::endl;
             double weight = 1.0 / N;
             double mean = 0.0;
             for (int k = 0; k < N; ++k)
@@ -243,8 +241,7 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
             // If the parent node is a leaf or the parent node is also null, we push back null
             if (current_idx != 0 && (tree[parent_idx] == NULL || tree[parent_idx]->cut_feature == -1))
             {
-                tree.push_back(NULL);
-                current_idx += 1;
+                curr_level[j] = NULL;
                 continue;
             }
             // Else if the current node's parent is not a leaf but the stopping criteria is reached, push back leaf
@@ -257,7 +254,7 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
                 leaf->prediction = mean;
                 leaf->cut_feature = -1;
                 leaf->cut_value = NAN;
-                tree.push_back(leaf);
+                curr_level[j] = leaf;
 
                 if (tree[parent_idx]->cut_feature != -1)
                 {
@@ -271,7 +268,6 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
                     }
                 }
 
-                current_idx += 1;
                 continue;
             }
 
@@ -280,10 +276,7 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
             thrust::device_vector<double> d_x_train(x_train_curr.begin(), x_train_curr.end());
             thrust::device_vector<double> d_y_train(y_train_curr.begin(), y_train_curr.end());
 
-            // std::cout << "d_x_train size: " << d_x_train.size() << "d_y_train size: " << d_y_train.size() << std::endl;
-
             split_output_t split = split_gpu(D, N, d_x_train, d_y_train);
-            // std::cout << "split feature: " << split.cut_feature << "split value: " << split.cut_value << "loss: " << split.loss << std::endl;
 
             std::vector<double> left_x_train, right_x_train;
             std::vector<double> left_y_train, right_y_train;
@@ -304,13 +297,10 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
                     right_y_train.push_back(y);
                 }
             }
-            // std::cout << "Created training splits" << std::endl;
 
             // Insert data for the next level
             split_data_temp[j * 2] = XYpair(left_x_train, left_y_train);
             split_data_temp[j * 2 + 1] = XYpair(right_x_train, right_y_train);
-
-            // std::cout << "Insert training data into split data temp" << std::endl;
 
             tree_node_t *node = (tree_node_t *)malloc(sizeof(tree_node_t));
             node->cut_feature = split.cut_feature;
@@ -331,20 +321,23 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
                 }
                 node->parent = tree[parent_idx];
             }
-            tree.push_back(node);
-
-            current_idx += 1;
+            curr_level[j] = node;
         }
+
+        // update the starting index of the next layer
+        current_layer_idx += curr_level_size;
+
+        tree.insert(tree.end(), curr_level.begin(), curr_level.end());
 
         // Check if the entire layer is NULL or Leaves
         bool allTrue = std::all_of(threadFinished.begin(), threadFinished.end(), [](bool element)
                                    { return element; });
-
         if (allTrue)
         {
             break;
         }
 
+        // populate the split data for the next layer
         split_data_curr = split_data_temp;
         split_data_temp.clear();
     }
