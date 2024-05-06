@@ -9,6 +9,8 @@
 #define NUM_STREAMS 32
 #define THRESHOLD 100 * DBL_EPSILON
 #define WRITE_TO_CSV false
+#define TRAIN_TEST_SPLIT 0.8
+#define NUM_TREES 1000
 
 typedef struct tree_node_t
 {
@@ -43,5 +45,5 @@ double eval_classification(int D, int N, std::vector<double> &x_test, std::vecto
 
 forest_t *build_forest(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth, int num_trees);
 
-double eval_forest(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, forest_t *forest);
+double eval_forest_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, forest_t *forest);
 #endif

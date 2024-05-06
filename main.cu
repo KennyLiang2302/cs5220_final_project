@@ -12,6 +12,7 @@
 #include "common.h"
 
 bool computeMSE = true;
+bool trainRF = false;
 
 // Command Line Option Processing
 int find_arg_idx(int argc, char **argv, const char *option)
@@ -39,14 +40,12 @@ char *find_string_option(int argc, char **argv, const char *option,
   return default_value;
 }
 
-void run_serial(double *x_train, double *y_train, double *x_test, double *y_test, int D, int total_size, int train_size, int test_size)
+void run(double *x_train, double *y_train, double *x_test, double *y_test, int D, int total_size, int train_size, int test_size)
 {
-  // track start time
-  auto start_time = std::chrono::steady_clock::now();
-
-  // train and predict
   std::vector<double> x_train_vec(x_train, x_train + D * train_size);
   std::vector<double> y_train_vec(y_train, y_train + train_size);
+  std::vector<double> x_test_vec(x_test, x_test + D * test_size);
+  std::vector<double> y_test_vec(y_test, y_test + test_size);
 
   if (WRITE_TO_CSV)
   {
@@ -55,28 +54,48 @@ void run_serial(double *x_train, double *y_train, double *x_test, double *y_test
     write_data_to_csv("../datasets/y_train.csv", y_train_vec, train_size, 1);
   }
 
-  tree_node_t *tree_node = build_cart(D, train_size, x_train_vec, y_train_vec, DEPTH);
-
-  std::cout << "EVALUATION STARTED" << std::endl;
-  std::vector<double> x_test_vec(x_test, x_test + D * test_size);
-  std::vector<double> y_test_vec(y_test, y_test + test_size);
-
+  // track start time
+  auto start_time = std::chrono::steady_clock::now();
+  std::chrono::time_point<std::chrono::steady_clock> training_end_time;
+  std::chrono::time_point<std::chrono::steady_clock> inference_end_time;
   double error;
-  if (computeMSE)
+
+  if (trainRF)
   {
-    error = eval_mse(D, test_size, x_test_vec, y_test_vec, tree_node);
+    forest_t *forest = build_forest(D, train_size, x_train_vec, y_train_vec, DEPTH, NUM_TREES);
+    training_end_time = std::chrono::steady_clock::now();
+    error = eval_forest_mse(D, test_size, x_test_vec, y_test_vec, forest);
+    inference_end_time = std::chrono::steady_clock::now();
   }
   else
   {
-    error = eval_classification(D, train_size, x_train_vec, y_train_vec, tree_node);
+    tree_node_t *tree_node = build_cart(D, train_size, x_train_vec, y_train_vec, DEPTH);
+    training_end_time = std::chrono::steady_clock::now();
+
+    if (computeMSE)
+    {
+      error = eval_mse(D, test_size, x_test_vec, y_test_vec, tree_node);
+    }
+    else
+    {
+      error = eval_classification(D, train_size, x_train_vec, y_train_vec, tree_node);
+    }
+
+    inference_end_time = std::chrono::steady_clock::now();
   }
 
-  auto end_time = std::chrono::steady_clock::now();
+  std::chrono::duration<double> training_diff = training_end_time - start_time;
+  double training_seconds = training_diff.count();
 
-  std::chrono::duration<double> diff = end_time - start_time;
-  double seconds = diff.count();
+  std::chrono::duration<double> inference_diff = inference_end_time - training_end_time;
+  double inference_seconds = inference_diff.count();
 
-  std::cout << "Training and Prediction Time = " << seconds << std::endl;
+  std::chrono::duration<double> total_diff = inference_end_time - start_time;
+  double total_seconds = total_diff.count();
+
+  std::cout << "Training and Inference Time = " << total_seconds << std::endl;
+  std::cout << "Training Time = " << training_seconds << std::endl;
+  std::cout << "Inference Time = " << inference_seconds << std::endl;
   std::cout << "Error = " << error << std::endl;
 }
 
@@ -88,7 +107,8 @@ int main(int argc, char **argv)
     std::cout << "Options:" << std::endl;
     std::cout << "-h: see this help" << std::endl;
     std::cout << "-f: dataset csv file name" << std::endl;
-    std::cout << "-e: evaluation error metric" << std::endl;
+    std::cout << "-e: evaluation error metric (mse or class)" << std::endl;
+    std::cout << "-m: model type (rf or dt)" << std::endl;
     return 0;
   }
 
@@ -102,9 +122,31 @@ int main(int argc, char **argv)
   {
     computeMSE = true;
   }
-  else
+  else if (eval_type == "class")
   {
     computeMSE = false;
+  }
+  else
+  {
+    std::cerr << "Error metric must be either mse or class" << std::endl;
+    return -1;
+  }
+
+  std::string model_type =
+      find_string_option(argc, argv, "-m", "dt");
+
+  if (model_type == "dt")
+  {
+    trainRF = false;
+  }
+  else if (model_type == "rf")
+  {
+    trainRF = true;
+  }
+  else
+  {
+    std::cerr << "Model type must be either rf or dt" << std::endl;
+    return -1;
   }
 
   std::ifstream dataset_file;
@@ -135,9 +177,9 @@ int main(int argc, char **argv)
   int N = csvData.size();
   // last dimension is the y_value
   int D = csvData[0].size() - 1;
-  std::cout << "N = " << N << std::endl;
-  std::cout << "D = " << D << std::endl;
-  int train_size = ceil(0.5 * N);
+  std::cout << "Dataset size is " << N << std::endl;
+  std::cout << "Dataset dimension is " << D << std::endl;
+  int train_size = ceil(TRAIN_TEST_SPLIT * N);
   int test_size = N - train_size;
 
   double *x_train = (double *)malloc(train_size * D * sizeof(double));
@@ -169,37 +211,8 @@ int main(int argc, char **argv)
     }
   }
 
-  // copy data to the gpu
-  double *x_train_gpu;
-  double *y_train_gpu;
-  double *x_test_gpu;
-  double *y_test_gpu;
-  double *accuracy_gpu;
-  cudaMalloc((void **)&x_train_gpu, train_size * D * sizeof(double));
-  cudaMalloc((void **)&y_train_gpu, train_size * sizeof(double));
-  cudaMalloc((void **)&x_test_gpu, test_size * D * sizeof(double));
-  cudaMalloc((void **)&y_test_gpu, test_size * sizeof(double));
-  cudaMalloc((void **)&accuracy_gpu, 1 * sizeof(double));
+  run(x_train, y_train, x_test, y_test, D, N, train_size, test_size);
 
-  cudaMemcpy(x_train_gpu, x_train, train_size * D * sizeof(double),
-             cudaMemcpyHostToDevice);
-  cudaMemcpy(x_test_gpu, x_test, test_size * D * sizeof(double),
-             cudaMemcpyHostToDevice);
-  cudaMemcpy(y_train_gpu, y_train, train_size * sizeof(double),
-             cudaMemcpyHostToDevice);
-  cudaMemcpy(y_test_gpu, y_test, test_size * sizeof(double),
-             cudaMemcpyHostToDevice);
-
-  // benchmark serial implementation
-  run_serial(x_train, y_train, x_test, y_test, D, N, train_size, test_size);
-
-  cudaDeviceSynchronize();
-  cudaMemcpy(accuracy, accuracy_gpu, sizeof(double), cudaMemcpyDeviceToHost);
-  cudaFree(x_train_gpu);
-  cudaFree(x_test_gpu);
-  cudaFree(y_train_gpu);
-  cudaFree(y_test_gpu);
-  cudaFree(accuracy_gpu);
   free(x_train);
   free(x_test);
   free(y_train);
