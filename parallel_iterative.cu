@@ -13,6 +13,7 @@
 #include <utility>
 #include <omp.h>
 #include <algorithm>
+#include <random>
 
 __device__ int round_down(int x, int D)
 {
@@ -428,42 +429,46 @@ double eval_classification(int D, int N, std::vector<double> &x_test, std::vecto
 
 forest_t *build_forest(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth, int num_trees)
 {
-    std::vector<tree_node_t *> trees;
-    std::vector<double> x_train_rand;
-    std::vector<double> y_train_rand;
+    int subsample_size = ceil(SUBSAMPLE_RATE * N);
+    forest_t *trees = new std::vector<tree_node_t *>(num_trees);
+    std::vector<double> x_train_rand(subsample_size * D);
+    std::vector<double> y_train_rand(subsample_size);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dist(0, N - 1);
 
     int random_idx;
     tree_node_t *curr_tree;
     for (int i = 0; i < num_trees; i++)
     {
-        for (int i = 0; i < N; i++)
+        for (int j = 0; j < subsample_size; j++)
         {
-            random_idx = rand() % N + 1;
-            x_train_rand.insert(x_train_rand.end(), x_train.begin() + random_idx * D, x_train.begin() + random_idx * D + D);
-            y_train_rand.push_back(y_train[random_idx]);
+            random_idx = dist(gen);
+            for (int k = 0; k < D; k++)
+            {
+                x_train_rand[j * D + k] = x_train[random_idx * D + k];
+            }
+            y_train_rand[j] = y_train[random_idx];
         }
-        curr_tree = build_cart(D, N, x_train_rand, y_train_rand, depth);
-        trees.push_back(curr_tree);
-        x_train_rand.clear();
-        y_train_rand.clear();
+        curr_tree = build_cart(D, subsample_size, x_train_rand, y_train_rand, depth);
+        (*trees)[i] = curr_tree;
     }
 
-    forest_t *node = (forest_t *)malloc(sizeof(forest_t));
-    node->trees = trees;
-    return node;
+    return trees;
 }
 
 double eval_forest_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, forest_t *forest)
 {
-    double weight = 1.0 / forest->trees.size();
-    std::vector<int> predictions(N, 0);
+    double weight = 1.0 / (*forest).size();
+    std::vector<double> predictions(N, 0);
 
-    for (int i = 0; i < forest->trees.size(); i++)
+    for (int i = 0; i < (*forest).size(); i++)
     {
         for (int j = 0; j < N; j++)
         {
             std::vector<double> data = std::vector<double>(x_test.begin() + j * D, x_test.begin() + j * D + D);
-            double prediction = eval_helper_gpu(forest->trees[i], data);
+            double prediction = eval_helper_gpu((*forest)[i], data);
             predictions[j] += weight * prediction;
         }
     }

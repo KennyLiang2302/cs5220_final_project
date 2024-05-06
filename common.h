@@ -11,6 +11,7 @@
 #define WRITE_TO_CSV false
 #define TRAIN_TEST_SPLIT 0.8
 #define NUM_TREES 1000
+#define SUBSAMPLE_RATE 0.8
 
 typedef struct tree_node_t
 {
@@ -22,10 +23,7 @@ typedef struct tree_node_t
   double prediction;
 } tree_node_t;
 
-typedef struct forest_t
-{
-  std::vector<tree_node_t *> trees;
-} forest_t;
+using forest_t = std::vector<tree_node_t *>;
 
 typedef struct split_output_t
 {
