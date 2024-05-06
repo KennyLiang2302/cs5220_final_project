@@ -19,62 +19,62 @@ __device__ int round_down(int x, int D)
     return x - (x % D);
 }
 
-thrust::device_vector<int> idif_gpu(thrust::device_vector<double> &x, int N)
+thrust::device_vector<int> idif_gpu(cudaStream_t &stream, thrust::device_vector<double> &x, int N)
 {
     // Find differences between adjacent values and store in diffs vector
     thrust::device_vector<double> adj_diffs(N);
-    thrust::adjacent_difference(x.begin(), x.end(), adj_diffs.begin());
+    thrust::adjacent_difference(thrust::cuda::par.on(stream), x.begin(), x.end(), adj_diffs.begin());
 
     // Make a zipped iterator that iterates diffs and idx
     thrust::device_vector<int> idx(N);
-    thrust::sequence(idx.begin(), idx.end());
+    thrust::sequence(thrust::cuda::par.on(stream), idx.begin(), idx.end());
     thrust::zip_iterator<thrust::tuple<thrust::device_vector<int>::iterator,
                                        thrust::device_vector<double>::iterator>>
         zipped_iterator = thrust::make_zip_iterator(thrust::make_tuple(idx.begin(), adj_diffs.begin()));
 
     // Count_if the number of elements that are different w.r.t. threshold
-    int size = thrust::count_if(zipped_iterator, zipped_iterator + idx.size(), [] __device__(thrust::tuple<int, double> pair)
+    int size = thrust::count_if(thrust::cuda::par.on(stream), zipped_iterator, zipped_iterator + idx.size(), [] __device__(thrust::tuple<int, double> pair)
                                 { return thrust::get<1>(pair) > THRESHOLD && thrust::get<0>(pair) != 0; });
     thrust::device_vector<thrust::tuple<int, double>> idif_tuples(size);
 
     // Use copy_if to store indices
-    thrust::copy_if(
-        zipped_iterator, zipped_iterator + idx.size(), idif_tuples.begin(), [] __device__(thrust::tuple<int, double> pair)
-        { return thrust::get<1>(pair) > THRESHOLD && thrust::get<0>(pair) != 0; });
+    thrust::copy_if(thrust::cuda::par.on(stream),
+                    zipped_iterator, zipped_iterator + idx.size(), idif_tuples.begin(), [] __device__(thrust::tuple<int, double> pair)
+                    { return thrust::get<1>(pair) > THRESHOLD && thrust::get<0>(pair) != 0; });
 
     // Use transform to subtract 1 from indices
     thrust::device_vector<int> idif_idx(size);
-    thrust::transform(idif_tuples.begin(), idif_tuples.end(), idif_idx.begin(), [] __device__(thrust::tuple<int, double> pair)
+    thrust::transform(thrust::cuda::par.on(stream), idif_tuples.begin(), idif_tuples.end(), idif_idx.begin(), [] __device__(thrust::tuple<int, double> pair)
                       { return thrust::get<0>(pair) - 1; });
 
     return idif_idx;
 }
 
-thrust::device_vector<int> argsort_exhaustive_gpu(thrust::device_vector<double> &x, int d, int D, int N)
+thrust::device_vector<int> argsort_exhaustive_gpu(cudaStream_t &stream, thrust::device_vector<double> &x, int d, int D, int N)
 {
     thrust::device_vector<int> indices(D * N);
-    thrust::sequence(indices.begin(), indices.end());
+    thrust::sequence(thrust::cuda::par.on(stream), indices.begin(), indices.end());
 
     double *x_ptr = thrust::raw_pointer_cast(x.data());
 
-    thrust::stable_sort(indices.begin(), indices.end(), [x_ptr, D, d] __device__(int left_idx, int right_idx)
+    thrust::stable_sort(thrust::cuda::par.on(stream), indices.begin(), indices.end(), [x_ptr, D, d] __device__(int left_idx, int right_idx)
                         { return x_ptr[(left_idx - (left_idx % D)) + d] < x_ptr[right_idx - (right_idx % D) + d]; });
     return indices;
 }
 
-thrust::device_vector<int> argsort_gpu(thrust::device_vector<double> &x, int d, int D, int N)
+thrust::device_vector<int> argsort_gpu(cudaStream_t &stream, thrust::device_vector<double> &x, int d, int D, int N)
 {
     thrust::device_vector<int> indices(N);
-    thrust::sequence(indices.begin(), indices.end());
+    thrust::sequence(thrust::cuda::par.on(stream), indices.begin(), indices.end());
 
     double *x_ptr = thrust::raw_pointer_cast(x.data());
 
-    thrust::stable_sort(indices.begin(), indices.end(), [x_ptr, D, d] __device__(int left_idx, int right_idx)
+    thrust::stable_sort(thrust::cuda::par.on(stream), indices.begin(), indices.end(), [x_ptr, D, d] __device__(int left_idx, int right_idx)
                         { return x_ptr[left_idx * D + d] < x_ptr[right_idx * D + d]; });
     return indices;
 }
 
-split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, thrust::device_vector<double> &y_train)
+split_output_t split_gpu(cudaStream_t &stream, int D, int N, thrust::device_vector<double> &x_train, thrust::device_vector<double> &y_train)
 {
     double weight = 1.0 / N;
 
@@ -84,39 +84,39 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
     init_output.cut_feature = std::numeric_limits<int>::infinity();
     init_output.cut_value = std::numeric_limits<double>::infinity();
     init_output.loss = std::numeric_limits<double>::infinity();
-    thrust::fill(split_results.begin(), split_results.end(), init_output);
+    thrust::fill(thrust::cuda::par.on(stream), split_results.begin(), split_results.end(), init_output);
 
     // iterate through each feature
     for (int d = 0; d < D; ++d)
     {
-        thrust::device_vector<int> indices_y = argsort_gpu(x_train, d, D, N);
+        thrust::device_vector<int> indices_y = argsort_gpu(stream, x_train, d, D, N);
 
         thrust::device_vector<int> indices_x(N);
-        thrust::transform(indices_y.begin(), indices_y.end(), indices_x.begin(),
+        thrust::transform(thrust::cuda::par.on(stream), indices_y.begin(), indices_y.end(), indices_x.begin(),
                           [D, d] __device__(int y_idx) -> int
                           { return y_idx * D + d; });
 
         thrust::device_vector<double> x_train_sorted(N);
         thrust::device_vector<double> y_train_sorted(N);
 
-        thrust::gather(thrust::device, indices_x.begin(), indices_x.end(), x_train.begin(), x_train_sorted.begin());
-        thrust::gather(thrust::device, indices_y.begin(), indices_y.end(), y_train.begin(), y_train_sorted.begin());
+        thrust::gather(thrust::cuda::par.on(stream), indices_x.begin(), indices_x.end(), x_train.begin(), x_train_sorted.begin());
+        thrust::gather(thrust::cuda::par.on(stream), indices_y.begin(), indices_y.end(), y_train.begin(), y_train_sorted.begin());
 
         thrust::device_vector<double> y_train_sorted_squared(N);
-        thrust::transform(y_train_sorted.begin(), y_train_sorted.end(), y_train_sorted_squared.begin(),
+        thrust::transform(thrust::cuda::par.on(stream), y_train_sorted.begin(), y_train_sorted.end(), y_train_sorted_squared.begin(),
                           [] __device__(double x) -> double
                           { return x * x; });
 
-        double mean_square_right = weight * thrust::reduce(y_train_sorted_squared.begin(), y_train_sorted_squared.end(), 0.0);
-        double mean_right = weight * thrust::reduce(y_train_sorted.begin(), y_train_sorted.end(), 0.0);
+        double mean_square_right = weight * thrust::reduce(thrust::cuda::par.on(stream), y_train_sorted_squared.begin(), y_train_sorted_squared.end(), 0.0);
+        double mean_right = weight * thrust::reduce(thrust::cuda::par.on(stream), y_train_sorted.begin(), y_train_sorted.end(), 0.0);
 
         thrust::device_vector<double> y_prefix_sum(N);
         thrust::device_vector<double> y_squared_prefix_sum(N);
 
-        thrust::inclusive_scan(thrust::device, y_train_sorted.begin(), y_train_sorted.end(), y_prefix_sum.begin());
-        thrust::inclusive_scan(thrust::device, y_train_sorted_squared.begin(), y_train_sorted_squared.end(), y_squared_prefix_sum.begin());
+        thrust::inclusive_scan(thrust::cuda::par.on(stream), y_train_sorted.begin(), y_train_sorted.end(), y_prefix_sum.begin());
+        thrust::inclusive_scan(thrust::cuda::par.on(stream), y_train_sorted_squared.begin(), y_train_sorted_squared.end(), y_squared_prefix_sum.begin());
 
-        thrust::device_vector<int> idif_indices = idif_gpu(x_train_sorted, N);
+        thrust::device_vector<int> idif_indices = idif_gpu(stream, x_train_sorted, N);
 
         split_output_t *split_results_ptr = thrust::raw_pointer_cast(split_results.data());
         double *x_train_sorted_ptr = thrust::raw_pointer_cast(x_train_sorted.data());
@@ -125,7 +125,7 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
         double *y_squared_prefix_sum_ptr = thrust::raw_pointer_cast(y_squared_prefix_sum.data());
 
         // todo go through idif indices
-        thrust::for_each(idif_indices.begin(), idif_indices.end(),
+        thrust::for_each(thrust::cuda::par.on(stream), idif_indices.begin(), idif_indices.end(),
                          [N, D, d, weight, mean_square_right, mean_right, split_results_ptr, y_prefix_sum_ptr, y_squared_prefix_sum_ptr, x_train_sorted_ptr] __device__(int index)
                          {
                              double mean_square_left = weight * y_squared_prefix_sum_ptr[index];
@@ -146,7 +146,7 @@ split_output_t split_gpu(int D, int N, thrust::device_vector<double> &x_train, t
         cudaDeviceSynchronize();
     }
 
-    split_output_t output = thrust::reduce(thrust::device, split_results.begin(), split_results.end(), init_output,
+    split_output_t output = thrust::reduce(thrust::cuda::par.on(stream), split_results.begin(), split_results.end(), init_output,
                                            [] __device__ __host__(split_output_t left, split_output_t right)
                                            {
                                                if (left.loss < right.loss)
@@ -205,6 +205,14 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
 
     omp_set_num_threads(NUM_THREADS);
 
+    // Array of CUDA Streams
+    cudaStream_t streams[NUM_STREAMS];
+
+    for (int stream_idx = 0; stream_idx < NUM_STREAMS; ++stream_idx)
+    {
+        cudaStreamCreate(&streams[stream_idx]);
+    }
+
     int current_layer_idx = 0;
     for (int i = 0; i <= depth; ++i)
     {
@@ -213,6 +221,7 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
         std::vector<tree_node_t *> curr_level(curr_level_size);
 
         split_data_temp.resize(pow(2, i + 1));
+
 #pragma omp parallel for
         for (int j = 0; j < curr_level_size; ++j)
         {
@@ -276,7 +285,7 @@ tree_node_t *build_cart(int D, int N_initial, std::vector<double> &x_train, std:
             thrust::device_vector<double> d_x_train(x_train_curr.begin(), x_train_curr.end());
             thrust::device_vector<double> d_y_train(y_train_curr.begin(), y_train_curr.end());
 
-            split_output_t split = split_gpu(D, N, d_x_train, d_y_train);
+            split_output_t split = split_gpu(streams[j % NUM_STREAMS], D, N, d_x_train, d_y_train);
 
             std::vector<double> left_x_train, right_x_train;
             std::vector<double> left_y_train, right_y_train;
