@@ -7,6 +7,7 @@
 #include <thrust/adjacent_difference.h>
 #include <thrust/count.h>
 #include <thrust/tuple.h>
+#include <thrust/logical.h>
 #include <vector>
 #include "common.h"
 #include <random>
@@ -181,33 +182,40 @@ split_output_t split_gpu(const thrust::detail::execution_policy_base<DerivedPoli
     return output;
 }
 
-/** Checks that all elements in a vector are equal to a value within some error */
-bool elements_equal_gpu(std::vector<double> &values, int size, double value, double epsilon)
-{
-    for (int i = 0; i < size; ++i)
-    {
-        if (std::fabs(values[i] - value) > epsilon)
-        {
-            return false;
-        }
-    }
-    return true;
+/** Checks that all elements in a vector are equal to a value within some error
+ */
+template <typename DerivedPolicy>
+bool elements_equal_gpu(const thrust::detail::execution_policy_base<DerivedPolicy> &exec_policy, std::vector<double> &values, int size, double value,
+                        double epsilon) {
+    // TODO, avoid copying a device vector here, optimally, a thurst vector is
+    // passed in.
+    thrust::device_vector<double> d_values = values;
+
+    int count = thrust::count_if(exec_policy, d_values.begin(), d_values.end(),
+                               [value, epsilon] __device__(double x) {
+                                 return std::fabs(x - value) > epsilon;
+                               });
+
+  return count == 0;
 }
 
 /** Checks that all rows are equal within some error*/
-bool rows_equal_gpu(std::vector<double> &x, int D, int N, double epsilon)
-{
-    for (int i = 0; i < N - 1; ++i)
-    {
-        for (int j = 0; j < D; ++j)
-        {
-            if (std::fabs(x[i * D + j] - x[(i + 1) * D + j]) > epsilon)
-            {
-                return false;
-            }
-        }
-    }
-    return true;
+template <typename DerivedPolicy>
+bool rows_equal_gpu(const thrust::detail::execution_policy_base<DerivedPolicy> &exec_policy, std::vector<double> &x, int D, int N, double epsilon) {
+
+    // TODO, same as above
+    thrust::device_vector<double> d_x = x;
+    thrust::device_ptr<double> d_x_ptr = d_x.data();
+
+    return thrust::all_of(exec_policy, thrust::make_counting_iterator(0), thrust::make_counting_iterator(N - 1),
+                        [d_x_ptr, D, epsilon] __device__ (int i) {
+                            for (int j = 0; j < D; ++j) {
+                                if (std::fabs(d_x_ptr[i * D + j] - d_x_ptr[(i + 1) * D + j]) > epsilon) {
+                                    return false;
+                                }
+                            }
+                            return true;
+                        });
 }
 
 tree_node_t *build_cart_helper(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
@@ -222,7 +230,7 @@ tree_node_t *build_cart_helper(int D, int N, std::vector<double> &x_train, std::
     mean /= N;
 
     // if no more branching can be done, return a leaf node
-    if (depth == 0 || elements_equal_gpu(y_train, N, y_train[0], THRESHOLD) || rows_equal_gpu(x_train, D, N, THRESHOLD))
+    if (depth == 0 || elements_equal_gpu(thrust::device, y_train, N, y_train[0], THRESHOLD) || rows_equal_gpu(thrust::device, x_train, D, N, THRESHOLD))
     {
         tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
         leaf->left = NULL;
@@ -356,7 +364,8 @@ tree_node_t *build_cart_iterative(int depth)
                 continue;
             }
             // Else if the current node's parent is not a leaf but the stopping criteria is reached, push back leaf
-            else if (i == depth || elements_equal_gpu(y_train_curr, N, y_train_curr[0], THRESHOLD) || rows_equal_gpu(x_train_curr, D_global, N, THRESHOLD))
+            else if (i == depth || elements_equal_gpu(thrust::cuda::par.on(streams[j % NUM_STREAMS]), y_train_curr, N, y_train_curr[0], THRESHOLD) || 
+                rows_equal_gpu(thrust::cuda::par.on(streams[j % NUM_STREAMS]), x_train_curr, D_global, N, THRESHOLD))
             {
                 tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
                 leaf->left = NULL;
