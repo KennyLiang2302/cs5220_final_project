@@ -5,33 +5,23 @@
 #include <algorithm>
 #include "common.h"
 #include <cassert>
-#include "util.h"
 #include <iostream>
 #include <cassert>
 #include <cstdlib>
 #include <random>
 
-void print_double_vector(std::vector<double> &host_vec, std::string name)
-{
-    // Print the host vector
-    std::cout << name << ":" << std::endl;
-    for (const auto &value : host_vec)
-    {
-        std::cout << value << " ";
-    }
-    std::cout << std::endl;
-}
+// GLOBAL VARIABLES
+std::vector<double> x_train_global;
+std::vector<double> y_train_global;
+std::vector<double> x_test_global;
+std::vector<double> y_test_global;
+int train_size_global;
+int test_size_global;
+int D_global;
 
-void print_int_vector(std::vector<int> &host_vec, std::string name)
-{
-    // Print the host vector
-    std::cout << name << ":" << std::endl;
-    for (const auto &value : host_vec)
-    {
-        std::cout << value << " ";
-    }
-    std::cout << std::endl;
-}
+std::vector<double> predictions_global;
+
+// HELPER FUNCTIONS
 
 std::vector<int> idif(std::vector<double> &x, int D, int N)
 {
@@ -187,7 +177,7 @@ bool rows_equal(std::vector<double> &x, int D, int N, double epsilon)
     return true;
 }
 
-tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
+tree_node_t *build_cart_helper(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
 {
     double mean = 0.0;
     for (int i = 0; i < N; ++i)
@@ -234,8 +224,8 @@ tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<
         }
 
         // recursively build left and right subtrees
-        tree_node_t *left = build_cart(D, left_y_train.size(), left_x_train, left_y_train, depth - 1);
-        tree_node_t *right = build_cart(D, right_y_train.size(), right_x_train, right_y_train, depth - 1);
+        tree_node_t *left = build_cart_helper(D, left_y_train.size(), left_x_train, left_y_train, depth - 1);
+        tree_node_t *right = build_cart_helper(D, right_y_train.size(), right_x_train, right_y_train, depth - 1);
 
         tree_node_t *node = (tree_node_t *)malloc(sizeof(tree_node_t));
         node->cut_feature = split.cut_feature;
@@ -249,7 +239,172 @@ tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<
     }
 }
 
-/** Recursive helper for evaluating an input data point using a tree */
+// IMPLEMENTATION
+
+void init(int D, int train_size, int test_size, std::vector<double> &x_train, std::vector<double> &y_train, std::vector<double> &x_test, std::vector<double> &y_test)
+{
+    D_global = D;
+    train_size_global = train_size;
+    test_size_global = test_size;
+    x_train_global = x_train;
+    y_train_global = y_train;
+    x_test_global = x_test;
+    y_test_global = y_test;
+    predictions_global = std::vector<double>(test_size_global);
+}
+
+tree_node_t *build_cart(int depth)
+{
+    return build_cart_helper(D_global, train_size_global, x_train_global, y_train_global, depth);
+}
+
+tree_node_t *build_cart_iterative(int depth)
+{
+    std::vector<tree_node_t *> tree;
+    using XYpair = std::pair<std::vector<double>, std::vector<double>>;
+
+    // Pair of (x training data, y training data)
+    std::vector<XYpair> split_data_curr(1);
+    std::vector<XYpair> split_data_temp;
+    split_data_curr[0] = XYpair(x_train_global, y_train_global);
+
+    int current_layer_idx = 0;
+    for (int i = 0; i <= depth; ++i)
+    {
+        int curr_level_size = pow(2, i);
+        std::vector<bool> threadFinished(curr_level_size, true);
+        std::vector<tree_node_t *> curr_level(curr_level_size);
+
+        split_data_temp.resize(pow(2, i + 1));
+
+        for (int j = 0; j < curr_level_size; ++j)
+        {
+            int current_idx = current_layer_idx + j;
+            std::vector<double> x_train_curr;
+            std::vector<double> y_train_curr;
+
+            x_train_curr = split_data_curr[j].first;
+            y_train_curr = split_data_curr[j].second;
+
+            int N = y_train_curr.size();
+
+            double weight = 1.0 / N;
+            double mean = 0.0;
+            for (int k = 0; k < N; ++k)
+            {
+                mean += y_train_curr[k];
+            }
+
+            mean /= N;
+
+            int parent_idx = (current_idx - 1) / 2;
+            bool isLeftChild = (current_idx - 1) % 2 == 0;
+
+            // Case where there should be no node at this index
+            // If the parent node is a leaf or the parent node is also null, we push back null
+            if (current_idx != 0 && (tree[parent_idx] == NULL || tree[parent_idx]->cut_feature == -1))
+            {
+                curr_level[j] = NULL;
+                continue;
+            }
+            // Else if the current node's parent is not a leaf but the stopping criteria is reached, push back leaf
+            else if (i == depth || elements_equal(y_train_curr, N, y_train_curr[0], THRESHOLD) || rows_equal(x_train_curr, D_global, N, THRESHOLD))
+            {
+                tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
+                leaf->left = NULL;
+                leaf->right = NULL;
+                leaf->parent = NULL;
+                leaf->prediction = mean;
+                leaf->cut_feature = -1;
+                leaf->cut_value = NAN;
+                curr_level[j] = leaf;
+
+                if (tree[parent_idx]->cut_feature != -1)
+                {
+                    if (isLeftChild)
+                    {
+                        tree[parent_idx]->left = leaf;
+                    }
+                    else
+                    {
+                        tree[parent_idx]->right = leaf;
+                    }
+                }
+
+                continue;
+            }
+
+            threadFinished[j] = false;
+
+            split_output_t split = split_serial(D_global, N, x_train_curr, y_train_curr);
+
+            std::vector<double> left_x_train, right_x_train;
+            std::vector<double> left_y_train, right_y_train;
+
+            for (int i = 0; i < N; ++i)
+            {
+                double x = x_train_curr[i * D_global + split.cut_feature];
+                double y = y_train_curr[i];
+
+                if (x <= split.cut_value)
+                {
+                    left_x_train.insert(left_x_train.end(), x_train_curr.begin() + i * D_global, x_train_curr.begin() + i * D_global + D_global);
+                    left_y_train.push_back(y);
+                }
+                else
+                {
+                    right_x_train.insert(right_x_train.end(), x_train_curr.begin() + i * D_global, x_train_curr.begin() + i * D_global + D_global);
+                    right_y_train.push_back(y);
+                }
+            }
+
+            // Insert data for the next level
+            split_data_temp[j * 2] = XYpair(left_x_train, left_y_train);
+            split_data_temp[j * 2 + 1] = XYpair(right_x_train, right_y_train);
+
+            tree_node_t *node = (tree_node_t *)malloc(sizeof(tree_node_t));
+            node->cut_feature = split.cut_feature;
+            node->cut_value = split.cut_value;
+            node->left = NULL;
+            node->right = NULL;
+            node->prediction = mean;
+
+            if (current_idx != 0)
+            {
+                if (isLeftChild)
+                {
+                    tree[parent_idx]->left = node;
+                }
+                else
+                {
+                    tree[parent_idx]->right = node;
+                }
+                node->parent = tree[parent_idx];
+            }
+            curr_level[j] = node;
+        }
+
+        // update the starting index of the next layer
+        current_layer_idx += curr_level_size;
+
+        tree.insert(tree.end(), curr_level.begin(), curr_level.end());
+
+        // Check if the entire layer is NULL or Leaves
+        bool allTrue = std::all_of(threadFinished.begin(), threadFinished.end(), [](bool element)
+                                   { return element; });
+        if (allTrue)
+        {
+            break;
+        }
+
+        // populate the split data for the next layer
+        split_data_curr = split_data_temp;
+        split_data_temp.clear();
+    }
+    return tree[0];
+}
+
+/** Recursive helper for evaluating an input data point using the root */
 double eval_helper(tree_node_t *tree, std::vector<double> &data)
 {
     if (tree->left == NULL && tree->right == NULL)
@@ -270,71 +425,57 @@ double eval_helper(tree_node_t *tree, std::vector<double> &data)
     }
 }
 
-double eval_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
+void compute_predictions(tree_node_t *tree)
 {
     // compute predictions
-    std::vector<double> predictions(N);
-    for (int i = 0; i < N; ++i)
+    for (int i = 0; i < test_size_global; ++i)
     {
-        std::vector<double> data = std::vector<double>(x_test.begin() + i * D, x_test.begin() + i * D + D);
+        std::vector<double> data = std::vector<double>(x_test_global.begin() + i * D_global, x_test_global.begin() + i * D_global + D_global);
         double prediction = eval_helper(tree, data);
-        predictions[i] = prediction;
+        predictions_global[i] = prediction;
     }
-
-    if (WRITE_TO_CSV)
-    {
-        write_data_to_csv("../datasets/pred.csv", predictions, N, 1);
-    }
-
-    // compute MSE
-    double accumulator = 0;
-    for (int i = 0; i < N; ++i)
-    {
-        accumulator += pow(predictions[i] - y_test[i], 2);
-    }
-
-    return accumulator / N;
 }
 
-double eval_classification(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree)
+double eval_mse(tree_node_t *tree)
 {
-    // compute predictions
-    std::vector<double> predictions(N);
-    for (int i = 0; i < N; ++i)
-    {
-        std::vector<double> data = std::vector<double>(x_test.begin() + i * D, x_test.begin() + i * D + D);
-        double prediction = copysign(1.0, eval_helper(tree, data));
-        predictions[i] = prediction;
-    }
-
-    if (WRITE_TO_CSV)
-    {
-        write_data_to_csv("../datasets/pred.csv", predictions, N, 1);
-    }
-
+    compute_predictions(tree);
     // compute MSE
     double accumulator = 0;
-    for (int i = 0; i < N; ++i)
+    for (int i = 0; i < test_size_global; ++i)
     {
-        if (predictions[i] != y_test[i])
+        accumulator += pow(predictions_global[i] - y_test_global[i], 2);
+    }
+
+    return accumulator / test_size_global;
+}
+
+double eval_classification(tree_node_t *tree)
+{
+    compute_predictions(tree);
+
+    // compute classification error
+    double accumulator = 0;
+    for (int i = 0; i < test_size_global; ++i)
+    {
+        if (predictions_global[i] != y_test_global[i])
         {
             accumulator += 1;
         }
     }
 
-    return accumulator / N;
+    return accumulator / test_size_global;
 }
 
-forest_t *build_forest(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth, int num_trees)
+forest_t *build_forest(int depth, int num_trees)
 {
-    int subsample_size = ceil(SUBSAMPLE_RATE * N);
+    int subsample_size = ceil(SUBSAMPLE_RATE * train_size_global);
     forest_t *trees = new std::vector<tree_node_t *>(num_trees);
-    std::vector<double> x_train_rand(subsample_size * D);
+    std::vector<double> x_train_rand(subsample_size * D_global);
     std::vector<double> y_train_rand(subsample_size);
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(0, N - 1);
+    std::uniform_int_distribution<> dist(0, train_size_global - 1);
 
     int random_idx;
     tree_node_t *curr_tree;
@@ -343,40 +484,39 @@ forest_t *build_forest(int D, int N, std::vector<double> &x_train, std::vector<d
         for (int j = 0; j < subsample_size; j++)
         {
             random_idx = dist(gen);
-            for (int k = 0; k < D; k++)
+            for (int k = 0; k < D_global; k++)
             {
-                x_train_rand[j * D + k] = x_train[random_idx * D + k];
+                x_train_rand[j * D_global + k] = x_train_global[random_idx * D_global + k];
             }
-            y_train_rand[j] = y_train[random_idx];
+            y_train_rand[j] = y_train_global[random_idx];
         }
-        curr_tree = build_cart(D, subsample_size, x_train_rand, y_train_rand, depth);
+        curr_tree = build_cart_helper(D_global, subsample_size, x_train_rand, y_train_rand, depth);
         (*trees)[i] = curr_tree;
     }
 
     return trees;
 }
 
-double eval_forest_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, forest_t *forest)
+double eval_forest_mse(forest_t *forest)
 {
     double weight = 1.0 / (*forest).size();
-    std::vector<double> predictions(N, 0);
 
     for (int i = 0; i < (*forest).size(); i++)
     {
-        for (int j = 0; j < N; j++)
+        for (int j = 0; j < test_size_global; j++)
         {
-            std::vector<double> data = std::vector<double>(x_test.begin() + j * D, x_test.begin() + j * D + D);
+            std::vector<double> data = std::vector<double>(x_test_global.begin() + j * D_global, x_test_global.begin() + j * D_global + D_global);
             double prediction = eval_helper((*forest)[i], data);
-            predictions[j] += weight * prediction;
+            predictions_global[j] += weight * prediction;
         }
     }
 
     // compute MSE
     double accumulator = 0;
-    for (int i = 0; i < N; ++i)
+    for (int i = 0; i < test_size_global; ++i)
     {
-        accumulator += pow(predictions[i] - y_test[i], 2);
+        accumulator += pow(predictions_global[i] - y_test_global[i], 2);
     }
 
-    return accumulator / N;
+    return accumulator / test_size_global;
 }

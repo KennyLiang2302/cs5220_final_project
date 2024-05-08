@@ -8,11 +8,9 @@
 #include <string>
 #include <vector>
 #include <sstream>
-#include "util.h"
 #include "common.h"
 
-bool computeMSE = true;
-bool trainRF = false;
+std::string model_type;
 
 // Command Line Option Processing
 int find_arg_idx(int argc, char **argv, const char *option)
@@ -40,6 +38,12 @@ char *find_string_option(int argc, char **argv, const char *option,
   return default_value;
 }
 
+double get_seconds(std::chrono::time_point<std::chrono::steady_clock> start, std::chrono::time_point<std::chrono::steady_clock> end)
+{
+  std::chrono::duration<double> diff = end - start;
+  return diff.count();
+}
+
 void run(double *x_train, double *y_train, double *x_test, double *y_test, int D, int total_size, int train_size, int test_size)
 {
   std::vector<double> x_train_vec(x_train, x_train + D * train_size);
@@ -47,56 +51,83 @@ void run(double *x_train, double *y_train, double *x_test, double *y_test, int D
   std::vector<double> x_test_vec(x_test, x_test + D * test_size);
   std::vector<double> y_test_vec(y_test, y_test + test_size);
 
-  if (WRITE_TO_CSV)
-  {
-    // create a csv with xtrain and ytrain data
-    write_data_to_csv("../datasets/x_train.csv", x_train_vec, train_size, D);
-    write_data_to_csv("../datasets/y_train.csv", y_train_vec, train_size, 1);
-  }
+  init(D, train_size, test_size, x_train_vec, y_train_vec, x_test_vec, y_test_vec);
 
   // track start time
   auto start_time = std::chrono::steady_clock::now();
-  std::chrono::time_point<std::chrono::steady_clock> training_end_time;
-  std::chrono::time_point<std::chrono::steady_clock> inference_end_time;
-  double error;
+  std::chrono::time_point<std::chrono::steady_clock> forest_training_end_time;
+  std::chrono::time_point<std::chrono::steady_clock> forest_inference_end_time;
+  std::chrono::time_point<std::chrono::steady_clock> tree_training_end_time;
+  std::chrono::time_point<std::chrono::steady_clock> tree_inference1_end_time;
+  std::chrono::time_point<std::chrono::steady_clock> tree_inference2_end_time;
+  std::chrono::time_point<std::chrono::steady_clock> tree_iter_training_end_time;
+  std::chrono::time_point<std::chrono::steady_clock> tree_iter_inference1_end_time;
 
-  if (trainRF)
+  double forest_mse;
+  double tree_mse;
+  double tree_class_error;
+  double tree_iter_mse;
+  double tree_iter_class_error;
+
+  if (model_type == "rf" || model_type == "all")
   {
-    forest_t *forest = build_forest(D, train_size, x_train_vec, y_train_vec, DEPTH, NUM_TREES);
-    training_end_time = std::chrono::steady_clock::now();
-    error = eval_forest_mse(D, test_size, x_test_vec, y_test_vec, forest);
-    inference_end_time = std::chrono::steady_clock::now();
-  }
-  else
-  {
-    tree_node_t *tree_node = build_cart(D, train_size, x_train_vec, y_train_vec, DEPTH);
-    training_end_time = std::chrono::steady_clock::now();
+    forest_t *forest = build_forest(DEPTH, NUM_TREES);
+    forest_training_end_time = std::chrono::steady_clock::now();
 
-    if (computeMSE)
-    {
-      error = eval_mse(D, test_size, x_test_vec, y_test_vec, tree_node);
-    }
-    else
-    {
-      error = eval_classification(D, train_size, x_train_vec, y_train_vec, tree_node);
-    }
-
-    inference_end_time = std::chrono::steady_clock::now();
+    forest_mse = eval_forest_mse(forest);
+    forest_inference_end_time = std::chrono::steady_clock::now();
   }
 
-  std::chrono::duration<double> training_diff = training_end_time - start_time;
-  double training_seconds = training_diff.count();
+  if (model_type == "dtr" || model_type == "all")
+  {
+    tree_node_t *tree = build_cart(DEPTH);
+    tree_training_end_time = std::chrono::steady_clock::now();
 
-  std::chrono::duration<double> inference_diff = inference_end_time - training_end_time;
-  double inference_seconds = inference_diff.count();
+    tree_mse = eval_mse(tree);
+    tree_inference1_end_time = std::chrono::steady_clock::now();
 
-  std::chrono::duration<double> total_diff = inference_end_time - start_time;
-  double total_seconds = total_diff.count();
+    tree_class_error = eval_classification(tree);
+    tree_inference2_end_time = std::chrono::steady_clock::now();
+  }
 
-  std::cout << "Training and Inference Time = " << total_seconds << std::endl;
-  std::cout << "Training Time = " << training_seconds << std::endl;
-  std::cout << "Inference Time = " << inference_seconds << std::endl;
-  std::cout << "Error = " << error << std::endl;
+  if (model_type == "dti" || model_type == "all")
+  {
+    tree_node_t *tree = build_cart_iterative(DEPTH);
+    tree_iter_training_end_time = std::chrono::steady_clock::now();
+
+    tree_iter_mse = eval_mse(tree);
+    tree_iter_inference1_end_time = std::chrono::steady_clock::now();
+
+    tree_iter_class_error = eval_classification(tree);
+  }
+
+  if (model_type == "rf" || model_type == "all")
+  {
+    std::cout << "Forest training time = " << get_seconds(start_time, forest_training_end_time) << std::endl;
+    std::cout << "Forest inference time = " << get_seconds(forest_training_end_time, forest_inference_end_time) << std::endl;
+    std::cout << "Forest MSE = " << forest_mse << std::endl;
+    std::cout << "=========================================================" << std::endl;
+  }
+
+  if (model_type == "dtr" || model_type == "all")
+  {
+    auto dtr_start_time = model_type == "all" ? forest_inference_end_time : start_time;
+    std::cout << "Decision Tree Recursive training time = " << get_seconds(dtr_start_time, tree_training_end_time) << std::endl;
+    std::cout << "Decision Tree Recursive inference time = " << get_seconds(tree_training_end_time, tree_inference1_end_time) << std::endl;
+    std::cout << "Decision Tree Recursive MSE = " << tree_mse << std::endl;
+    std::cout << "Decision Tree Recursive Classification Error = " << tree_class_error << std::endl;
+    std::cout << "=========================================================" << std::endl;
+  }
+
+  if (model_type == "dti" || model_type == "all")
+  {
+    auto dti_start_time = model_type == "all" ? tree_inference2_end_time : start_time;
+    std::cout << "Decision Tree Iterative training time = " << get_seconds(dti_start_time, tree_iter_training_end_time) << std::endl;
+    std::cout << "Decision Tree Iterative inference time = " << get_seconds(tree_iter_training_end_time, tree_iter_inference1_end_time) << std::endl;
+    std::cout << "Decision Tree Iterative MSE = " << tree_iter_mse << std::endl;
+    std::cout << "Decision Tree Iterative Classification Error = " << tree_iter_class_error << std::endl;
+    std::cout << "=========================================================" << std::endl;
+  }
 }
 
 int main(int argc, char **argv)
@@ -107,45 +138,18 @@ int main(int argc, char **argv)
     std::cout << "Options:" << std::endl;
     std::cout << "-h: see this help" << std::endl;
     std::cout << "-f: dataset csv file name" << std::endl;
-    std::cout << "-e: evaluation error metric (mse or class)" << std::endl;
-    std::cout << "-m: model type (rf or dt)" << std::endl;
+    std::cout << "-m: model type (rf or dtr or dti or all)" << std::endl;
     return 0;
   }
 
   char *dataset_file_name =
       find_string_option(argc, argv, "-f", "../datasets/Admission_Predict.csv");
 
-  std::string eval_type =
-      find_string_option(argc, argv, "-e", "mse");
+  model_type = find_string_option(argc, argv, "-m", "all");
 
-  if (eval_type == "mse")
+  if (model_type != "dtr" && model_type != "rf" && model_type != "dti" && model_type != "all")
   {
-    computeMSE = true;
-  }
-  else if (eval_type == "class")
-  {
-    computeMSE = false;
-  }
-  else
-  {
-    std::cerr << "Error metric must be either mse or class" << std::endl;
-    return -1;
-  }
-
-  std::string model_type =
-      find_string_option(argc, argv, "-m", "dt");
-
-  if (model_type == "dt")
-  {
-    trainRF = false;
-  }
-  else if (model_type == "rf")
-  {
-    trainRF = true;
-  }
-  else
-  {
-    std::cerr << "Model type must be either rf or dt" << std::endl;
+    std::cerr << "Model type must be either rf, dti, dtr, or all" << std::endl;
     return -1;
   }
 
@@ -179,6 +183,7 @@ int main(int argc, char **argv)
   int D = csvData[0].size() - 1;
   std::cout << "Dataset size is " << N << std::endl;
   std::cout << "Dataset dimension is " << D << std::endl;
+  std::cout << "=========================================================" << std::endl;
   int train_size = ceil(TRAIN_TEST_SPLIT * N);
   int test_size = N - train_size;
 

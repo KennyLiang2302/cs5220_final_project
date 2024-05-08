@@ -32,16 +32,17 @@ typedef struct split_output_t
   double loss;
 } split_output_t;
 
-// function for tree construction. xtrain and ytrain are both in cpu memory
-tree_node_t *build_cart(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth);
+void init(int D, int train_size, int test_size, std::vector<double> &x_train, std::vector<double> &y_train, std::vector<double> &x_test, std::vector<double> &y_test);
 
-// function for making predictions on a dataset and computing accuracy. xtest
-// and ytest are both in cpu memory
-double eval_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree);
+tree_node_t *build_cart(int depth);
 
-double eval_classification(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, tree_node_t *tree);
+tree_node_t *build_cart_iterative(int depth);
 
-forest_t *build_forest(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth, int num_trees);
+double eval_mse(tree_node_t *tree);
 
-double eval_forest_mse(int D, int N, std::vector<double> &x_test, std::vector<double> &y_test, forest_t *forest);
+double eval_classification(tree_node_t *tree);
+
+forest_t *build_forest(int depth, int num_trees);
+
+double eval_forest_mse(forest_t *forest);
 #endif
