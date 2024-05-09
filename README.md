@@ -8,6 +8,9 @@ Generate build files:
 Allocate a GPU node:
 `salloc -N 1 -q interactive -t 01:00:00 --constraint gpu -G 1 --account=m4341`
 
+Allocate a CPU node:
+`salloc -N 1 -q interactive -t 01:00:00 --constraint cpu --account=m4341`
+
 Run serial implementation: `./serial`
 
 Run parallel implementation: `./gpu`

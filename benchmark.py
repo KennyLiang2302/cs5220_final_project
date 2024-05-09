@@ -9,16 +9,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error
 
 # read in csv
-data = pd.read_csv('datasets/spiral_1000000.csv')
-x = data.drop('y', axis=1)
-y = data['y']
+data = pd.read_csv('datasets/random_5000000.csv')
+x = data.drop('Label', axis=1)
+y = data['Label']
 
 # split the data
 x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2)
 
 # make the regression tree
 start_time = time.time()
-tree = DecisionTreeRegressor(max_depth=20)
+tree = DecisionTreeRegressor(max_depth=10)
 tree.fit(x_train, y_train)
 
 # inference
