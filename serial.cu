@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <random>
+#include <chrono>
 
 // GLOBAL VARIABLES
 std::vector<double> x_train_global;
@@ -145,6 +146,7 @@ split_output_t split_serial(int D, int N, std::vector<double> &x_train, std::vec
     output.cut_feature = feature;
     output.cut_value = cut_value;
     output.loss = min_loss;
+
     return output;
 }
 

@@ -1,5 +1,6 @@
 #include <cuda.h>
 #include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
@@ -14,12 +15,40 @@
 #include <thrust/random.h>
 #include <omp.h>
 #include <algorithm>
-#include <random>
 #include <thrust/execution_policy.h>
+#include <thrust/partition.h>
+
+void print_device_double_vector(thrust::device_vector<double> &dev_vec, std::string name)
+{
+    std::vector<double> host_vec(dev_vec.size());
+    thrust::copy(dev_vec.begin(), dev_vec.end(), host_vec.begin());
+
+    // Print the host vector
+    std::cout << name << ":" << std::endl;
+    for (const auto &value : host_vec)
+    {
+        std::cout << value << " ";
+    }
+    std::cout << std::endl;
+}
+
+void print_device_int_vector(thrust::device_vector<int> &dev_vec, std::string name)
+{
+    std::vector<int> host_vec(dev_vec.size());
+    thrust::copy(dev_vec.begin(), dev_vec.end(), host_vec.begin());
+
+    // Print the host vector
+    std::cout << name << ":" << std::endl;
+    for (const auto &value : host_vec)
+    {
+        std::cout << value << " ";
+    }
+    std::cout << std::endl;
+}
 
 // GLOBAL VARIABLES
-std::vector<double> x_train_global;
-std::vector<double> y_train_global;
+thrust::device_vector<double> *x_train_global;
+thrust::device_vector<double> *y_train_global;
 std::vector<double> x_test_global;
 std::vector<double> y_test_global;
 int train_size_global;
@@ -35,12 +64,13 @@ __device__ int round_down(int x, int D)
     return x - (x % D);
 }
 
+// TODO, can try to optimize this function.
 template <typename DerivedPolicy>
 thrust::device_vector<int> idif_gpu(const thrust::detail::execution_policy_base<DerivedPolicy> &exec_policy, thrust::device_vector<double> &x, int N)
 {
     // Find differences between adjacent values and store in diffs vector
     thrust::device_vector<double> adj_diffs(N);
-    thrust::adjacent_difference(thrust::host, x.begin(), x.end(), adj_diffs.begin());
+    thrust::adjacent_difference(exec_policy, x.begin(), x.end(), adj_diffs.begin());
 
     // Make a zipped iterator that iterates diffs and idx
     thrust::device_vector<int> idx(N);
@@ -65,19 +95,24 @@ thrust::device_vector<int> idif_gpu(const thrust::detail::execution_policy_base<
                       { return thrust::get<0>(pair) - 1; });
 
     return idif_idx;
-}
 
-template <typename DerivedPolicy>
-thrust::device_vector<int> argsort_exhaustive_gpu(const thrust::detail::execution_policy_base<DerivedPolicy> &exec_policy, thrust::device_vector<double> &x, int d, int D, int N)
-{
-    thrust::device_vector<int> indices(D * N);
-    thrust::sequence(exec_policy, indices.begin(), indices.end());
+    // // Calculate differences between adjacent values
+    // thrust::device_vector<double> diffs(N - 1);
+    // thrust::adjacent_difference(exec_policy, x.begin() + 1, x.end(), diffs.begin());
 
-    double *x_ptr = thrust::raw_pointer_cast(x.data());
+    // // Find indices where difference is greater than threshold
+    // int count = 0;
+    // thrust::device_vector<int> idif_idx(N - 2);
+    // thrust::for_each(exec_policy, thrust::make_counting_iterator(1), thrust::make_counting_iterator(N - 1), [diffs, THRESHOLD, &idif_idx, &count] __device__(int idx)
+    //                 {
+    //                     if (diffs[idx - 1] > THRESHOLD)
+    //                     {
+    //                         idif_idx[count] = idx;
+    //                         count++;
+    //                     }
+    //                 });
 
-    thrust::stable_sort(exec_policy, indices.begin(), indices.end(), [x_ptr, D, d] __device__(int left_idx, int right_idx)
-                        { return x_ptr[(left_idx - (left_idx % D)) + d] < x_ptr[right_idx - (right_idx % D) + d]; });
-    return indices;
+    // idif_idx.resize(count);
 }
 
 template <typename DerivedPolicy>
@@ -185,52 +220,45 @@ split_output_t split_gpu(const thrust::detail::execution_policy_base<DerivedPoli
 /** Checks that all elements in a vector are equal to a value within some error
  */
 template <typename DerivedPolicy>
-bool elements_equal_gpu(const thrust::detail::execution_policy_base<DerivedPolicy> &exec_policy, std::vector<double> &values, int size, double value,
-                        double epsilon) {
-    // TODO, avoid copying a device vector here, optimally, a thurst vector is
-    // passed in.
-    thrust::device_vector<double> d_values = values;
-
-    int count = thrust::count_if(exec_policy, d_values.begin(), d_values.end(),
-                               [value, epsilon] __device__(double x) {
-                                 return std::fabs(x - value) > epsilon;
-                               });
-
-  return count == 0;
+bool elements_equal_gpu(const thrust::detail::execution_policy_base<DerivedPolicy> &exec_policy, thrust::device_vector<double> &values, int size,
+                        double epsilon)
+{
+    thrust::device_ptr<double> values_ptr = values.data();
+    return thrust::all_of(exec_policy, values.begin(), values.end(),
+                          [=] __device__(double x)
+                          {
+                              return fabs(x - values_ptr[0]) <= epsilon;
+                          });
 }
 
 /** Checks that all rows are equal within some error*/
 template <typename DerivedPolicy>
-bool rows_equal_gpu(const thrust::detail::execution_policy_base<DerivedPolicy> &exec_policy, std::vector<double> &x, int D, int N, double epsilon) {
-
+bool rows_equal_gpu(const thrust::detail::execution_policy_base<DerivedPolicy> &exec_policy, thrust::device_vector<double> &d_x, int D, int N, double epsilon)
+{
     // TODO, same as above
-    thrust::device_vector<double> d_x = x;
     thrust::device_ptr<double> d_x_ptr = d_x.data();
 
     return thrust::all_of(exec_policy, thrust::make_counting_iterator(0), thrust::make_counting_iterator(N - 1),
-                        [d_x_ptr, D, epsilon] __device__ (int i) {
-                            for (int j = 0; j < D; ++j) {
-                                if (std::fabs(d_x_ptr[i * D + j] - d_x_ptr[(i + 1) * D + j]) > epsilon) {
-                                    return false;
-                                }
-                            }
-                            return true;
-                        });
+                          [=] __device__(int i)
+                          {
+                              for (int j = 0; j < D; ++j)
+                              {
+                                  if (fabs(d_x_ptr[i * D + j] - d_x_ptr[(i + 1) * D + j]) > epsilon)
+                                  {
+                                      return false;
+                                  }
+                              }
+                              return true;
+                          });
 }
 
-tree_node_t *build_cart_helper(int D, int N, std::vector<double> &x_train, std::vector<double> &y_train, int depth)
+tree_node_t *build_cart_helper(int D, int N, thrust::device_vector<double> &d_x_train, thrust::device_vector<double> &d_y_train, int depth)
 {
     double weight = 1.0 / N;
-    double mean = 0.0;
-    for (int i = 0; i < N; ++i)
-    {
-        mean += y_train[i];
-    }
-
-    mean /= N;
+    double mean = thrust::reduce(thrust::device, d_y_train.begin(), d_y_train.end(), 0.0) / N;
 
     // if no more branching can be done, return a leaf node
-    if (depth == 0 || elements_equal_gpu(thrust::device, y_train, N, y_train[0], THRESHOLD) || rows_equal_gpu(thrust::device, x_train, D, N, THRESHOLD))
+    if (depth == 0 || elements_equal_gpu(thrust::device, d_y_train, N, THRESHOLD) || rows_equal_gpu(thrust::device, d_x_train, D, N, THRESHOLD))
     {
         tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
         leaf->left = NULL;
@@ -243,30 +271,51 @@ tree_node_t *build_cart_helper(int D, int N, std::vector<double> &x_train, std::
     }
     else
     {
-        thrust::device_vector<double> d_x_train(x_train.begin(), x_train.end());
-        thrust::device_vector<double> d_y_train(y_train.begin(), y_train.end());
+        thrust::device_ptr<double> d_x_train_ptr = d_x_train.data();
 
         split_output_t split = split_gpu(thrust::device, D, N, d_x_train, d_y_train);
 
-        std::vector<double> left_x_train, right_x_train;
-        std::vector<double> left_y_train, right_y_train;
+        int size_left = thrust::count_if(thrust::device,
+                                         thrust::make_counting_iterator(0), thrust::make_counting_iterator(N),
+                                         [d_x_train_ptr, split, D] __device__(int i)
+                                         {
+                                             double x = d_x_train_ptr[i * D + split.cut_feature];
+                                             return x <= split.cut_value;
+                                         });
+        int size_right = N - size_left;
 
-        for (int i = 0; i < N; ++i)
-        {
-            double x = x_train[i * D + split.cut_feature];
-            double y = y_train[i];
+        thrust::device_vector<int> left_indices(size_left);
+        thrust::device_vector<int> right_indices(size_right);
+        thrust::device_vector<int> left_x_indices(size_left * D);
+        thrust::device_vector<int> right_x_indices(size_right * D);
 
-            if (x <= split.cut_value)
-            {
-                left_x_train.insert(left_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
-                left_y_train.push_back(y);
-            }
-            else
-            {
-                right_x_train.insert(right_x_train.end(), x_train.begin() + i * D, x_train.begin() + i * D + D);
-                right_y_train.push_back(y);
-            }
-        }
+        thrust::stable_partition_copy(thrust::device,
+                                      thrust::make_counting_iterator(0), thrust::make_counting_iterator(N),
+                                      left_indices.begin(), right_indices.begin(),
+                                      [=] __device__(int i)
+                                      {
+                                          double x = d_x_train_ptr[i * D + split.cut_feature];
+                                          return x <= split.cut_value;
+                                      });
+
+        thrust::stable_partition_copy(thrust::device,
+                                      thrust::make_counting_iterator(0), thrust::make_counting_iterator(N * D),
+                                      left_x_indices.begin(), right_x_indices.begin(),
+                                      [=] __device__(int i)
+                                      {
+                                          double x = d_x_train_ptr[(i / D) * D + split.cut_feature];
+                                          return x <= split.cut_value;
+                                      });
+
+        thrust::device_vector<double> left_x_train(left_indices.size() * D);
+        thrust::device_vector<double> right_x_train(right_indices.size() * D);
+        thrust::device_vector<double> left_y_train(left_indices.size());
+        thrust::device_vector<double> right_y_train(right_indices.size());
+
+        thrust::gather(thrust::device, left_indices.begin(), left_indices.end(), d_y_train.begin(), left_y_train.begin());
+        thrust::gather(thrust::device, right_indices.begin(), right_indices.end(), d_y_train.begin(), right_y_train.begin());
+        thrust::gather(thrust::device, left_x_indices.begin(), left_x_indices.end(), d_x_train.begin(), left_x_train.begin());
+        thrust::gather(thrust::device, right_x_indices.begin(), right_x_indices.end(), d_x_train.begin(), right_x_train.begin());
 
         // recursively build left and right subtrees
         tree_node_t *left = build_cart_helper(D, left_y_train.size(), left_x_train, left_y_train, depth - 1);
@@ -291,8 +340,8 @@ void init(int D, int train_size, int test_size, std::vector<double> &x_train, st
     D_global = D;
     train_size_global = train_size;
     test_size_global = test_size;
-    x_train_global = x_train;
-    y_train_global = y_train;
+    x_train_global = new thrust::device_vector<double>(x_train.begin(), x_train.end());
+    y_train_global = new thrust::device_vector<double>(y_train.begin(), y_train.end());
     x_test_global = x_test;
     y_test_global = y_test;
     predictions_global = std::vector<double>(test_size_global);
@@ -300,18 +349,18 @@ void init(int D, int train_size, int test_size, std::vector<double> &x_train, st
 
 tree_node_t *build_cart(int depth)
 {
-    return build_cart_helper(D_global, train_size_global, x_train_global, y_train_global, depth);
+    return build_cart_helper(D_global, train_size_global, *x_train_global, *y_train_global, depth);
 }
 
 tree_node_t *build_cart_iterative(int depth)
 {
     std::vector<tree_node_t *> tree;
-    using XYpair = std::pair<std::vector<double>, std::vector<double>>;
+    using XYpair = std::pair<thrust::device_vector<double>, thrust::device_vector<double>>;
 
     // Pair of (x training data, y training data)
     std::vector<XYpair> split_data_curr(1);
     std::vector<XYpair> split_data_temp;
-    split_data_curr[0] = XYpair(x_train_global, y_train_global);
+    split_data_curr[0] = XYpair(*x_train_global, *y_train_global);
 
     omp_set_num_threads(NUM_THREADS);
 
@@ -336,8 +385,8 @@ tree_node_t *build_cart_iterative(int depth)
         for (int j = 0; j < curr_level_size; ++j)
         {
             int current_idx = current_layer_idx + j;
-            std::vector<double> x_train_curr;
-            std::vector<double> y_train_curr;
+            thrust::device_vector<double> x_train_curr;
+            thrust::device_vector<double> y_train_curr;
 
             x_train_curr = split_data_curr[j].first;
             y_train_curr = split_data_curr[j].second;
@@ -345,13 +394,7 @@ tree_node_t *build_cart_iterative(int depth)
             int N = y_train_curr.size();
 
             double weight = 1.0 / N;
-            double mean = 0.0;
-            for (int k = 0; k < N; ++k)
-            {
-                mean += y_train_curr[k];
-            }
-
-            mean /= N;
+            double mean = thrust::reduce(y_train_curr.begin(), y_train_curr.end(), 0.0) / N;
 
             int parent_idx = (current_idx - 1) / 2;
             bool isLeftChild = (current_idx - 1) % 2 == 0;
@@ -364,8 +407,8 @@ tree_node_t *build_cart_iterative(int depth)
                 continue;
             }
             // Else if the current node's parent is not a leaf but the stopping criteria is reached, push back leaf
-            else if (i == depth || elements_equal_gpu(thrust::cuda::par.on(streams[j % NUM_STREAMS]), y_train_curr, N, y_train_curr[0], THRESHOLD) || 
-                rows_equal_gpu(thrust::cuda::par.on(streams[j % NUM_STREAMS]), x_train_curr, D_global, N, THRESHOLD))
+            else if (i == depth || elements_equal_gpu(thrust::cuda::par.on(streams[j % NUM_STREAMS]), y_train_curr, N, THRESHOLD) ||
+                     rows_equal_gpu(thrust::cuda::par.on(streams[j % NUM_STREAMS]), x_train_curr, D_global, N, THRESHOLD))
             {
                 tree_node_t *leaf = (tree_node_t *)malloc(sizeof(tree_node_t));
                 leaf->left = NULL;
@@ -393,30 +436,52 @@ tree_node_t *build_cart_iterative(int depth)
 
             threadFinished[j] = false;
 
-            thrust::device_vector<double> d_x_train(x_train_curr.begin(), x_train_curr.end());
-            thrust::device_vector<double> d_y_train(y_train_curr.begin(), y_train_curr.end());
+            split_output_t split = split_gpu(thrust::cuda::par.on(streams[j % NUM_STREAMS]), D_global, N, x_train_curr, y_train_curr);
 
-            split_output_t split = split_gpu(thrust::cuda::par.on(streams[j % NUM_STREAMS]), D_global, N, d_x_train, d_y_train);
+            thrust::device_ptr<double> x_train_curr_ptr = x_train_curr.data();
+            int D_local = D_global;
 
-            std::vector<double> left_x_train, right_x_train;
-            std::vector<double> left_y_train, right_y_train;
+            int size_left = thrust::count_if(thrust::cuda::par.on(streams[j % NUM_STREAMS]),
+                                             thrust::make_counting_iterator(0), thrust::make_counting_iterator(N),
+                                             [x_train_curr_ptr, split, D_local] __device__(int i)
+                                             {
+                                                 double x = x_train_curr_ptr[i * D_local + split.cut_feature];
+                                                 return x <= split.cut_value;
+                                             });
+            int size_right = N - size_left;
 
-            for (int i = 0; i < N; ++i)
-            {
-                double x = x_train_curr[i * D_global + split.cut_feature];
-                double y = y_train_curr[i];
+            thrust::device_vector<int> left_indices(size_left);
+            thrust::device_vector<int> right_indices(size_right);
+            thrust::device_vector<int> left_x_indices(size_left * D_global);
+            thrust::device_vector<int> right_x_indices(size_right * D_global);
 
-                if (x <= split.cut_value)
-                {
-                    left_x_train.insert(left_x_train.end(), x_train_curr.begin() + i * D_global, x_train_curr.begin() + i * D_global + D_global);
-                    left_y_train.push_back(y);
-                }
-                else
-                {
-                    right_x_train.insert(right_x_train.end(), x_train_curr.begin() + i * D_global, x_train_curr.begin() + i * D_global + D_global);
-                    right_y_train.push_back(y);
-                }
-            }
+            thrust::stable_partition_copy(thrust::cuda::par.on(streams[j % NUM_STREAMS]),
+                                          thrust::make_counting_iterator(0), thrust::make_counting_iterator(N),
+                                          left_indices.begin(), right_indices.begin(),
+                                          [x_train_curr_ptr, split, D_local] __device__(int i)
+                                          {
+                                              double x = x_train_curr_ptr[i * D_local + split.cut_feature];
+                                              return x <= split.cut_value;
+                                          });
+
+            thrust::stable_partition_copy(thrust::cuda::par.on(streams[j % NUM_STREAMS]),
+                                          thrust::make_counting_iterator(0), thrust::make_counting_iterator(N * D_global),
+                                          left_x_indices.begin(), right_x_indices.begin(),
+                                          [x_train_curr_ptr, split, D_local] __device__(int i)
+                                          {
+                                              double x = x_train_curr_ptr[(i / D_local) * D_local + split.cut_feature];
+                                              return x <= split.cut_value;
+                                          });
+
+            thrust::device_vector<double> left_x_train(left_indices.size() * D_global);
+            thrust::device_vector<double> right_x_train(right_indices.size() * D_global);
+            thrust::device_vector<double> left_y_train(left_indices.size());
+            thrust::device_vector<double> right_y_train(right_indices.size());
+
+            thrust::gather(thrust::cuda::par.on(streams[j % NUM_STREAMS]), left_indices.begin(), left_indices.end(), y_train_curr.begin(), left_y_train.begin());
+            thrust::gather(thrust::cuda::par.on(streams[j % NUM_STREAMS]), right_indices.begin(), right_indices.end(), y_train_curr.begin(), right_y_train.begin());
+            thrust::gather(thrust::cuda::par.on(streams[j % NUM_STREAMS]), left_x_indices.begin(), left_x_indices.end(), x_train_curr.begin(), left_x_train.begin());
+            thrust::gather(thrust::cuda::par.on(streams[j % NUM_STREAMS]), right_x_indices.begin(), right_x_indices.end(), x_train_curr.begin(), right_x_train.begin());
 
             // Insert data for the next level
             split_data_temp[j * 2] = XYpair(left_x_train, left_y_train);
@@ -511,40 +576,93 @@ double eval_mse(tree_node_t *tree)
 double eval_classification(tree_node_t *tree)
 {
     compute_predictions(tree);
-    // compute MSE
+
+    // compute classification error
     double accumulator = 0;
     for (int i = 0; i < test_size_global; ++i)
     {
-        accumulator += pow(predictions_global[i] - y_test_global[i], 2);
+        if (predictions_global[i] != y_test_global[i])
+        {
+            accumulator += 1;
+        }
     }
 
     return accumulator / test_size_global;
 }
 
+// struct IndexTransformer : public thrust::unary_function<int, int>
+// {
+//     int D_local;
+//     int d;
+
+//     __host__ __device__
+//     IndexTransformer(int D_local, int d) : D_local(D_local), d(d) {}
+
+//     __host__ __device__ int operator()(int idx) const
+//     {
+//         return idx * D_local + d;
+//     }
+// };
+
+struct RandomGenerator
+{
+    int a, b;
+
+    __host__ __device__
+    RandomGenerator(int _a, int _b) : a(_a), b(_b) {};
+
+    __host__ __device__ float operator()(const unsigned int n) const
+    {
+        thrust::default_random_engine rng;
+        thrust::uniform_int_distribution<int> dist(a, b);
+        rng.discard(n);
+
+        return dist(rng);
+    }
+};
+
 forest_t *build_forest(int depth, int num_trees)
 {
     int subsample_size = ceil(SUBSAMPLE_RATE * train_size_global);
     forest_t *trees = new std::vector<tree_node_t *>(num_trees);
-    std::vector<double> x_train_rand(subsample_size * D_global);
-    std::vector<double> y_train_rand(subsample_size);
+    thrust::device_vector<double> x_train_rand(subsample_size * D_global);
+    thrust::device_vector<double> y_train_rand(subsample_size);
 
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dist(0, train_size_global - 1);
-
-    int random_idx;
+    thrust::device_vector<int> random_idx(subsample_size);
     tree_node_t *curr_tree;
+    int D_local = D_global;
+
+    thrust::device_ptr<double> x_train_global_ptr = (*x_train_global).data();
+    thrust::device_ptr<double> x_train_rand_ptr = x_train_rand.data();
+    thrust::device_ptr<int> random_idx_ptr = random_idx.data();
+
+    // print_device_double_vector(*x_train_global, "X train global: ");
+
     for (int i = 0; i < num_trees; i++)
     {
-        for (int j = 0; j < subsample_size; j++)
+        thrust::counting_iterator<unsigned int> index_sequence_begin(i * subsample_size);
+        thrust::transform(thrust::device, index_sequence_begin,
+                          index_sequence_begin + random_idx.size(),
+                          random_idx.begin(),
+                          RandomGenerator(0, train_size_global - 1));
+
+        thrust::gather(thrust::device, random_idx.begin(), random_idx.end(),
+                       (*y_train_global).begin(), y_train_rand.begin());
+
+        // print_device_int_vector(random_idx, "Random idx: ");
+
+        for (int d = 0; d < D_global; d++)
         {
-            random_idx = dist(gen);
-            for (int k = 0; k < D_global; k++)
-            {
-                x_train_rand[j * D_global + k] = x_train_global[random_idx * D_global + k];
-            }
-            y_train_rand[j] = y_train_global[random_idx];
+            thrust::counting_iterator<unsigned int> counting_iter(0);
+            thrust::for_each(thrust::device,
+                             counting_iter,
+                             counting_iter + subsample_size,
+                             [=] __device__(int idx)
+                             {
+                                 x_train_rand_ptr[idx * D_local + d] = x_train_global_ptr[random_idx_ptr[idx] * D_local + d];
+                             });
         }
+        // print_device_double_vector(x_train_rand, "x_train_rand ");
         curr_tree = build_cart_helper(D_global, subsample_size, x_train_rand, y_train_rand, depth);
         (*trees)[i] = curr_tree;
     }
