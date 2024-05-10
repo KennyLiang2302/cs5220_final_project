@@ -5,12 +5,12 @@
 #include <vector>
 
 #define DEPTH 10
-#define NUM_THREADS 32
-#define NUM_STREAMS 32
+#define NUM_THREADS 1
+#define NUM_STREAMS 1
 #define THRESHOLD 100 * DBL_EPSILON
 #define WRITE_TO_CSV false
 #define TRAIN_TEST_SPLIT 0.8
-#define NUM_TREES 1000
+#define NUM_TREES 50
 #define SUBSAMPLE_RATE 0.8
 
 typedef struct tree_node_t
