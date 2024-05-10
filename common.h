@@ -5,8 +5,8 @@
 #include <vector>
 
 #define DEPTH 10
-#define NUM_THREADS 1
-#define NUM_STREAMS 1
+#define NUM_THREADS 64
+#define NUM_STREAMS 32
 #define THRESHOLD 100 * DBL_EPSILON
 #define WRITE_TO_CSV false
 #define TRAIN_TEST_SPLIT 0.8

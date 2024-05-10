@@ -18,34 +18,6 @@
 #include <thrust/execution_policy.h>
 #include <thrust/partition.h>
 
-void print_device_double_vector(thrust::device_vector<double> &dev_vec, std::string name)
-{
-    std::vector<double> host_vec(dev_vec.size());
-    thrust::copy(dev_vec.begin(), dev_vec.end(), host_vec.begin());
-
-    // Print the host vector
-    std::cout << name << ":" << std::endl;
-    for (const auto &value : host_vec)
-    {
-        std::cout << value << " ";
-    }
-    std::cout << std::endl;
-}
-
-void print_device_int_vector(thrust::device_vector<int> &dev_vec, std::string name)
-{
-    std::vector<int> host_vec(dev_vec.size());
-    thrust::copy(dev_vec.begin(), dev_vec.end(), host_vec.begin());
-
-    // Print the host vector
-    std::cout << name << ":" << std::endl;
-    for (const auto &value : host_vec)
-    {
-        std::cout << value << " ";
-    }
-    std::cout << std::endl;
-}
-
 // GLOBAL VARIABLES
 thrust::device_vector<double> *x_train_global;
 thrust::device_vector<double> *y_train_global;
@@ -95,24 +67,6 @@ thrust::device_vector<int> idif_gpu(const thrust::detail::execution_policy_base<
                       { return thrust::get<0>(pair) - 1; });
 
     return idif_idx;
-
-    // // Calculate differences between adjacent values
-    // thrust::device_vector<double> diffs(N - 1);
-    // thrust::adjacent_difference(exec_policy, x.begin() + 1, x.end(), diffs.begin());
-
-    // // Find indices where difference is greater than threshold
-    // int count = 0;
-    // thrust::device_vector<int> idif_idx(N - 2);
-    // thrust::for_each(exec_policy, thrust::make_counting_iterator(1), thrust::make_counting_iterator(N - 1), [diffs, THRESHOLD, &idif_idx, &count] __device__(int idx)
-    //                 {
-    //                     if (diffs[idx - 1] > THRESHOLD)
-    //                     {
-    //                         idif_idx[count] = idx;
-    //                         count++;
-    //                     }
-    //                 });
-
-    // idif_idx.resize(count);
 }
 
 template <typename DerivedPolicy>
@@ -224,11 +178,11 @@ bool elements_equal_gpu(const thrust::detail::execution_policy_base<DerivedPolic
                         double epsilon)
 {
     thrust::device_ptr<double> values_ptr = values.data();
-    return thrust::all_of(exec_policy, values.begin(), values.end(),
-                          [=] __device__(double x)
-                          {
-                              return fabs(x - values_ptr[0]) <= epsilon;
-                          });
+    return thrust::count_if(exec_policy, values.begin(), values.end(),
+                            [=] __device__(double x)
+                            {
+                                return fabs(x - values_ptr[0]) > epsilon;
+                            }) == 0;
 }
 
 /** Checks that all rows are equal within some error*/
@@ -238,18 +192,18 @@ bool rows_equal_gpu(const thrust::detail::execution_policy_base<DerivedPolicy> &
     // TODO, same as above
     thrust::device_ptr<double> d_x_ptr = d_x.data();
 
-    return thrust::all_of(exec_policy, thrust::make_counting_iterator(0), thrust::make_counting_iterator(N - 1),
-                          [=] __device__(int i)
-                          {
-                              for (int j = 0; j < D; ++j)
-                              {
-                                  if (fabs(d_x_ptr[i * D + j] - d_x_ptr[(i + 1) * D + j]) > epsilon)
-                                  {
-                                      return false;
-                                  }
-                              }
-                              return true;
-                          });
+    return thrust::count_if(exec_policy, thrust::make_counting_iterator(0), thrust::make_counting_iterator(N - 1),
+                            [=] __device__(int i)
+                            {
+                                for (int j = 0; j < D; ++j)
+                                {
+                                    if (fabs(d_x_ptr[i * D + j] - d_x_ptr[(i + 1) * D + j]) > epsilon)
+                                    {
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            }) == 0;
 }
 
 tree_node_t *build_cart_helper(int D, int N, thrust::device_vector<double> &d_x_train, thrust::device_vector<double> &d_y_train, int depth)
@@ -394,7 +348,7 @@ tree_node_t *build_cart_iterative(int depth)
             int N = y_train_curr.size();
 
             double weight = 1.0 / N;
-            double mean = thrust::reduce(y_train_curr.begin(), y_train_curr.end(), 0.0) / N;
+            double mean = thrust::reduce(thrust::cuda::par.on(streams[j % NUM_STREAMS]), y_train_curr.begin(), y_train_curr.end(), 0.0) / N;
 
             int parent_idx = (current_idx - 1) / 2;
             bool isLeftChild = (current_idx - 1) % 2 == 0;
@@ -590,20 +544,6 @@ double eval_classification(tree_node_t *tree)
     return accumulator / test_size_global;
 }
 
-// struct IndexTransformer : public thrust::unary_function<int, int>
-// {
-//     int D_local;
-//     int d;
-
-//     __host__ __device__
-//     IndexTransformer(int D_local, int d) : D_local(D_local), d(d) {}
-
-//     __host__ __device__ int operator()(int idx) const
-//     {
-//         return idx * D_local + d;
-//     }
-// };
-
 struct RandomGenerator
 {
     int a, b;
@@ -636,8 +576,6 @@ forest_t *build_forest(int depth, int num_trees)
     thrust::device_ptr<double> x_train_rand_ptr = x_train_rand.data();
     thrust::device_ptr<int> random_idx_ptr = random_idx.data();
 
-    // print_device_double_vector(*x_train_global, "X train global: ");
-
     for (int i = 0; i < num_trees; i++)
     {
         thrust::counting_iterator<unsigned int> index_sequence_begin(i * subsample_size);
@@ -648,8 +586,6 @@ forest_t *build_forest(int depth, int num_trees)
 
         thrust::gather(thrust::device, random_idx.begin(), random_idx.end(),
                        (*y_train_global).begin(), y_train_rand.begin());
-
-        // print_device_int_vector(random_idx, "Random idx: ");
 
         for (int d = 0; d < D_global; d++)
         {
@@ -662,7 +598,6 @@ forest_t *build_forest(int depth, int num_trees)
                                  x_train_rand_ptr[idx * D_local + d] = x_train_global_ptr[random_idx_ptr[idx] * D_local + d];
                              });
         }
-        // print_device_double_vector(x_train_rand, "x_train_rand ");
         curr_tree = build_cart_helper(D_global, subsample_size, x_train_rand, y_train_rand, depth);
         (*trees)[i] = curr_tree;
     }
