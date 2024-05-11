@@ -13,6 +13,10 @@ Allocate a CPU node:
 
 Run serial implementation: `./serial`
 
-Run parallel implementation: `./gpu`
+Run parallel implementation: `./gpu -m dtf`
 
-Run parallel iterative implementation: `./gpu_iterative`
+Run parallel iterative implementation: `./gpu -m dti`
+
+## Acknowledgements
+
+Admission prediction dataset: https://www.kaggle.com/datasets/mohansacharya/graduate-admissions

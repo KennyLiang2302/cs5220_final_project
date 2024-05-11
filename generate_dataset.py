@@ -1,7 +1,7 @@
 import numpy as np
 import csv
 
-N = 150
+N = 5000000
 filename_prefix = "./datasets/spiral"
 
 
